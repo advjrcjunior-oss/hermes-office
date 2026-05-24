@@ -145,6 +145,34 @@ type OpsStatus = {
       status?: string;
     } | null;
   };
+  media?: {
+    ok?: boolean;
+    configuredCount?: number;
+    total?: number;
+    providers?: Array<{
+      id?: string;
+      label?: string;
+      kind?: string;
+      configured?: boolean;
+      role?: string;
+      defaultUse?: string;
+      approval?: string;
+    }>;
+    pipeline?: Array<{
+      step?: string;
+      owner?: string;
+      tool?: string;
+      configured?: boolean;
+      note?: string;
+    }>;
+    budgetPolicy?: {
+      paidGenerationRequiresApproval?: boolean;
+      publishRequiresApproval?: boolean;
+      highCostVideoRequiresApproval?: boolean;
+    };
+    recommendedDefault?: string;
+    missing?: string[];
+  };
   jrcHub?: {
     ok?: boolean;
     readOnlyKeyConfigured?: boolean;
@@ -938,6 +966,53 @@ export function OperationsPanel({
             {(snapshot?.traces?.latest ?? []).length === 0 ? (
               <div className="text-[11px] text-white/35">Nenhum trace registrado ainda.</div>
             ) : null}
+          </div>
+        </section>
+
+        <section className="mt-3 rounded border border-fuchsia-400/15 bg-fuchsia-950/10 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-fuchsia-100/75">
+              Media Ops
+            </div>
+            <div className="font-mono text-[10px] text-fuchsia-100/50">
+              {formatNumber(snapshot?.media?.configuredCount)} / {formatNumber(snapshot?.media?.total)}
+            </div>
+          </div>
+          <div className="mt-2 text-[11px] leading-4 text-white/45">
+            {snapshot?.media?.recommendedDefault ?? "Pipeline de midia ainda nao carregado."}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {(snapshot?.media?.providers ?? []).map((provider) => (
+              <div key={provider.id ?? provider.label} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate font-mono text-[10px] uppercase tracking-[0.1em] text-white/60">
+                    {provider.label ?? provider.id}
+                  </div>
+                  <div className={provider.configured ? "text-[10px] text-emerald-200" : "text-[10px] text-amber-200"}>
+                    {provider.configured ? "ok" : "falta"}
+                  </div>
+                </div>
+                <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.08em] text-fuchsia-100/45">
+                  {provider.kind}
+                </div>
+                <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-white/40">{provider.defaultUse}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid gap-1.5">
+            {(snapshot?.media?.pipeline ?? []).map((step) => (
+              <div key={`${step.step}-${step.tool}`} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-black/20 px-2 py-1.5">
+                <span className="truncate text-[11px] text-white/50">
+                  {step.step} / {step.tool}
+                </span>
+                <span className={step.configured ? "font-mono text-[10px] text-emerald-200" : "font-mono text-[10px] text-amber-200"}>
+                  {step.configured ? "ok" : "manual"}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
+            Geracao paga, publicacao e video de alto custo continuam exigindo aprovacao humana.
           </div>
         </section>
 

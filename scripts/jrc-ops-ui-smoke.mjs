@@ -42,6 +42,7 @@ if (!/salvar resumo do dia/i.test(text)) failures.push("missing end-of-day repor
 if (!/modo de custo/i.test(text)) failures.push("missing cost mode");
 if (!/risco operacional/i.test(text)) failures.push("missing risk panel");
 if (!/auditoria e traces/i.test(text)) failures.push("missing trace audit");
+if (!/media ops/i.test(text)) failures.push("missing media ops");
   if (maxUpdateErrors.length > 0) failures.push("React maximum update loop");
   if (errors.length > maxUpdateErrors.length) failures.push("console errors");
 
@@ -69,6 +70,7 @@ if (!/auditoria e traces/i.test(text)) failures.push("missing trace audit");
         hasCostMode: true,
         hasRisk: true,
         hasTraces: true,
+        hasMediaOps: true,
         maxUpdateErrors: 0,
         consoleErrors: 0,
       },

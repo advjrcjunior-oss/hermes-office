@@ -2684,6 +2684,101 @@ function getEnginePolicyStatus() {
   };
 }
 
+function getMediaOpsStatus() {
+  const providers = [
+    {
+      id: "elevenlabs",
+      label: "ElevenLabs",
+      kind: "voice",
+      env: "ELEVENLABS_API_KEY",
+      role: "voz natural e voice clone para videos HeyGen/Reels",
+      defaultUse: "roteiro -> voz PT-BR natural",
+      approval: "required_for_publish",
+    },
+    {
+      id: "google-gemini",
+      label: "Google/Gemini",
+      kind: "image",
+      env: "GOOGLE_API_KEY",
+      role: "nano-banana/Gemini image para criativos e imagens isoladas",
+      defaultUse: "imagem estatica e variacoes de campanha",
+      approval: "required_for_external_use",
+    },
+    {
+      id: "openai",
+      label: "OpenAI",
+      kind: "image",
+      env: "OPENAI_API_KEY",
+      role: "fallback de imagem/vision quando modelo local nao basta",
+      defaultUse: "criativo pontual e analise visual nao sensivel",
+      approval: "required_for_sensitive_docs",
+    },
+    {
+      id: "fal",
+      label: "Fal.ai",
+      kind: "image_video",
+      env: "FAL_API_KEY",
+      role: "Flux/Veo/Kling e geracao de B-roll",
+      defaultUse: "video curto, B-roll e imagem premium",
+      approval: "required_for_paid_generation",
+    },
+    {
+      id: "replicate",
+      label: "Replicate",
+      kind: "image_video",
+      env: "REPLICATE_API_KEY",
+      role: "fallback para modelos de imagem/video",
+      defaultUse: "experimentos controlados e fallback",
+      approval: "required_for_paid_generation",
+    },
+    {
+      id: "ideogram",
+      label: "Ideogram",
+      kind: "image",
+      env: "IDEOGRAM_API_KEY",
+      role: "arte com texto e criativos de campanha",
+      defaultUse: "posts com lettering/titulos",
+      approval: "required_for_external_use",
+    },
+    {
+      id: "creatomate",
+      label: "Creatomate",
+      kind: "video_edit",
+      env: "CREATOMATE_API_KEY",
+      role: "montagem programatica de videos, templates e render",
+      defaultUse: "juntar voz, avatar, legenda e B-roll",
+      approval: "required_for_publish",
+    },
+  ].map((provider) => ({
+    ...provider,
+    configured: Boolean(process.env[provider.env]?.trim()),
+  }));
+  const configuredCount = providers.filter((provider) => provider.configured).length;
+  const missing = providers.filter((provider) => !provider.configured).map((provider) => provider.id);
+  return {
+    ok: missing.length === 0,
+    configuredCount,
+    total: providers.length,
+    providers,
+    pipeline: [
+      { step: "roteiro", owner: "jrc-amy", tool: "Claude/Codex/Kimi", configured: true },
+      { step: "voz", owner: "jrc-amy", tool: "ElevenLabs", configured: providers.some((p) => p.id === "elevenlabs" && p.configured) },
+      { step: "avatar", owner: "jrc-amy", tool: "HeyGen", configured: false, note: "sem API key local detectada; usar MCP/plano externo quando disponivel" },
+      { step: "b-roll", owner: "jrc-marketing", tool: "Fal/Replicate/Higgsfield", configured: providers.some((p) => (p.id === "fal" || p.id === "replicate") && p.configured) },
+      { step: "edicao", owner: "jrc-marketing", tool: "Creatomate/Captions/Submagic", configured: providers.some((p) => p.id === "creatomate" && p.configured), note: "Captions/Submagic seguem como ferramenta externa sem key local" },
+      { step: "publicacao", owner: "humano", tool: "aprovacao humana", configured: true },
+    ],
+    budgetPolicy: {
+      defaultMode: "approval_first",
+      paidGenerationRequiresApproval: true,
+      publishRequiresApproval: true,
+      highCostVideoRequiresApproval: true,
+    },
+    recommendedDefault: "ElevenLabs -> HeyGen/MCP -> Creatomate -> Fal/Replicate B-roll, com aprovacao antes de gastar alto ou publicar.",
+    missing,
+  };
+}
+
 loadMeetingsFromDisk();
 loadCostModeFromDisk();
 loadTracesFromDisk();
@@ -2828,6 +2923,7 @@ function buildEndOfDayReport() {
     costMode: getCostModeStatus(),
     risk: getRiskPanelStatus(),
     traces: summarizeTraces(5),
+    media: getMediaOpsStatus(),
   };
   const lines = [
     `# Hermes Office - Relatorio operacional ${todayKey()}`,
@@ -2842,6 +2938,7 @@ function buildEndOfDayReport() {
     `- Execucoes internas hoje: ${ops.budget.totalRuns}/${ops.budget.limits.totalDaily}`,
     `- Modo de custo: ${ops.costMode.mode}`,
     `- Risco operacional: ${ops.risk.level} (${ops.risk.flags.join("; ") || "sem alertas"})`,
+    `- Midia configurada: ${ops.media.configuredCount}/${ops.media.total}`,
     "",
     "## Por area",
     ...ops.today.summary.map((item) => `- ${item.label}: ${item.value}`),
@@ -2860,6 +2957,9 @@ function buildEndOfDayReport() {
     ...(ops.traces.latest.length
       ? ops.traces.latest.map((trace) => `- ${trace.id}: ${trace.kind}/${trace.status} ${trace.taskId || trace.meetingId || ""}`)
       : ["- Nenhum trace registrado."]),
+    "",
+    "## Media Ops",
+    ...ops.media.providers.map((provider) => `- ${provider.label}: ${provider.configured ? "configurado" : "faltando"} (${provider.kind})`),
     "",
     "## Safety",
     "- Auto-run global permanece conforme .env.",
@@ -2913,6 +3013,7 @@ async function getOperationsStatus() {
     today: getTodayPanelStatus(),
     risk: getRiskPanelStatus(engineUsage, hubStatus),
     traces: summarizeTraces(12),
+    media: getMediaOpsStatus(),
     jrcHub: hubStatus,
     safety: {
       externalActionsLocked: true,
