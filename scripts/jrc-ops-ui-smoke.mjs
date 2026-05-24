@@ -39,6 +39,9 @@ if (!/\bhoje\b/i.test(text)) failures.push("missing today panel");
 if (!/aprovacoes humanas/i.test(text)) failures.push("missing approvals inbox");
 if (!/cadeia segura/i.test(text)) failures.push("missing safe chain action");
 if (!/salvar resumo do dia/i.test(text)) failures.push("missing end-of-day report action");
+if (!/modo de custo/i.test(text)) failures.push("missing cost mode");
+if (!/risco operacional/i.test(text)) failures.push("missing risk panel");
+if (!/auditoria e traces/i.test(text)) failures.push("missing trace audit");
   if (maxUpdateErrors.length > 0) failures.push("React maximum update loop");
   if (errors.length > maxUpdateErrors.length) failures.push("console errors");
 
@@ -63,6 +66,9 @@ if (!/salvar resumo do dia/i.test(text)) failures.push("missing end-of-day repor
         hasMeetingRoom: true,
         hasToday: true,
         hasApprovals: true,
+        hasCostMode: true,
+        hasRisk: true,
+        hasTraces: true,
         maxUpdateErrors: 0,
         consoleErrors: 0,
       },

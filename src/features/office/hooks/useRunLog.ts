@@ -69,6 +69,8 @@ export const useRunLog = ({
 }) => {
   const [records, setRecords] = useState<RunRecord[]>([]);
   const agentsRef = useRef(agents);
+  const clientRef = useRef(client);
+  const statusRef = useRef(status);
   const visibleRecords = useMemo(() => (enabled ? records : []), [enabled, records]);
 
   useEffect(() => {
@@ -76,9 +78,14 @@ export const useRunLog = ({
   }, [agents]);
 
   useEffect(() => {
+    clientRef.current = client;
+    statusRef.current = status;
+  }, [client, status]);
+
+  useEffect(() => {
     if (!enabled) return;
-    if (status !== "connected") return;
-    return client.onEvent((event) => {
+    if (statusRef.current !== "connected") return;
+    return clientRef.current.onEvent((event) => {
       if (event.event !== "agent") return;
       const payload = event.payload as AgentEventPayload | undefined;
       if (!payload?.runId) return;
@@ -130,7 +137,7 @@ export const useRunLog = ({
         return [fallbackRecord, ...current].slice(0, Math.max(1, maxRecords));
       });
     });
-  }, [client, enabled, maxRecords, status]);
+  }, [enabled, maxRecords]);
 
   return visibleRecords;
 };

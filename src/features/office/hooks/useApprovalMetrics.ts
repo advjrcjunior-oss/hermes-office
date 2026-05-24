@@ -46,6 +46,8 @@ export const useApprovalMetrics = ({
 }) => {
   const [records, setRecords] = useState<ApprovalRecord[]>([]);
   const agentsRef = useRef(agents);
+  const clientRef = useRef(client);
+  const statusRef = useRef(status);
   const visibleRecords = useMemo(() => (enabled ? records : []), [enabled, records]);
 
   useEffect(() => {
@@ -53,9 +55,14 @@ export const useApprovalMetrics = ({
   }, [agents]);
 
   useEffect(() => {
+    clientRef.current = client;
+    statusRef.current = status;
+  }, [client, status]);
+
+  useEffect(() => {
     if (!enabled) return;
-    if (status !== "connected") return;
-    return client.onEvent((event) => {
+    if (statusRef.current !== "connected") return;
+    return clientRef.current.onEvent((event) => {
       const requested = parseExecApprovalRequested(event);
       if (requested) {
         const agentId = resolveExecApprovalAgentId({
@@ -109,7 +116,7 @@ export const useApprovalMetrics = ({
         return [fallbackRecord, ...current].slice(0, MAX_APPROVAL_RECORDS);
       });
     });
-  }, [client, enabled, status]);
+  }, [enabled]);
 
   const byAgent = useMemo(() => {
     const metrics = new Map<string, ApprovalAgentMetrics>();

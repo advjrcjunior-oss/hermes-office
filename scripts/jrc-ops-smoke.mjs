@@ -18,6 +18,9 @@ if (typeof payload?.tasks?.total !== "number") failures.push("missing task total
 if (!payload?.meetings?.maestro?.agentId) failures.push("missing maestro meeting status");
 if (!Array.isArray(payload?.cadence?.daily)) failures.push("missing cadence");
 if (!Array.isArray(payload?.today?.summary)) failures.push("missing today summary");
+if (!payload?.costMode?.mode) failures.push("missing cost mode");
+if (!payload?.risk?.level) failures.push("missing risk panel");
+if (!Array.isArray(payload?.traces?.latest)) failures.push("missing traces");
 if (!payload?.safety?.externalActionsLocked) failures.push("safety lock is not enabled");
 
 if (failures.length > 0) {
@@ -35,6 +38,9 @@ console.log(
       limits: payload.engines.limits ?? {},
       meetings: payload.meetings.total ?? 0,
       approvals: payload.tasks.approval?.pending ?? 0,
+      costMode: payload.costMode.mode,
+      risk: payload.risk.level,
+      traces: payload.traces.total ?? 0,
       todayReady: payload.today.workflow?.ready ?? 0,
       autoRunEnabled: payload.budget.limits.autoRunEnabled,
       externalActionsLocked: payload.safety.externalActionsLocked,

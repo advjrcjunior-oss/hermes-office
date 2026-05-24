@@ -54,9 +54,14 @@ ws.on("open", async () => {
     if (!status?.meetings?.room?.pattern) failures.push("missing meeting pattern");
     if (!Array.isArray(status?.tasks?.approvals)) failures.push("missing approval inbox");
     if (!Array.isArray(status?.today?.summary)) failures.push("missing today panel");
+    if (!status?.costMode?.mode) failures.push("missing cost mode");
+    if (!status?.risk?.level) failures.push("missing risk panel");
+    if (!Array.isArray(status?.traces?.latest)) failures.push("missing traces");
     if (!status?.cadence?.suggestedNext && !Array.isArray(status?.cadence?.daily)) {
       failures.push("missing cadence");
     }
+    const traces = await call("ops.traces.list", { limit: 5 });
+    if (!Array.isArray(traces?.latest)) failures.push("missing traces method");
     const dryRun = await call("tasks.runChain", { maxSteps: 2, dryRun: true });
     if (!Array.isArray(dryRun?.planned)) failures.push("missing safe chain dry run");
     const report = await call("ops.report.write", { dryRun: true });
@@ -77,6 +82,9 @@ ws.on("open", async () => {
           maestro: status.meetings.maestro.agentId,
           plannedChainTasks: dryRun.planned.length,
           reportDryRun: report.dryRun,
+          costMode: status.costMode.mode,
+          risk: status.risk.level,
+          traces: status.traces.total ?? 0,
           approvals: status.tasks.approval?.pending ?? 0,
           externalActionsLocked: status.safety.externalActionsLocked,
         },

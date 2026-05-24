@@ -45,6 +45,8 @@ export const useOfficeSkillsMarketplace = ({
   onSkillActivityEnd?: (agentId: string) => void;
 }) => {
   const requestIdRef = useRef(0);
+  const clientRef = useRef(client);
+  const statusRef = useRef(status);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
     preferredAgentId ?? null,
   );
@@ -73,6 +75,11 @@ export const useOfficeSkillsMarketplace = ({
   );
 
   useEffect(() => {
+    clientRef.current = client;
+    statusRef.current = status;
+  }, [client, status]);
+
+  useEffect(() => {
     const preferred = (preferredAgentId ?? "").trim();
     const current = (selectedAgentId ?? "").trim();
     const hasCurrent =
@@ -90,7 +97,7 @@ export const useOfficeSkillsMarketplace = ({
   const loadMarketplace = useCallback(
     async (agentId: string) => {
       const resolvedAgentId = agentId.trim();
-      if (!enabled || !resolvedAgentId || status !== "connected") {
+      if (!enabled || !resolvedAgentId || statusRef.current !== "connected") {
         setSkillsReport(null);
         setSkillsAllowlist(undefined);
         setLoading(false);
@@ -103,9 +110,9 @@ export const useOfficeSkillsMarketplace = ({
       setError(null);
       try {
         const [report, allowlist] = await Promise.all([
-          loadAgentSkillStatus(client, resolvedAgentId),
+          loadAgentSkillStatus(clientRef.current, resolvedAgentId),
           readGatewayAgentSkillsAllowlist({
-            client,
+            client: clientRef.current,
             agentId: resolvedAgentId,
           }),
         ]);
@@ -134,11 +141,11 @@ export const useOfficeSkillsMarketplace = ({
         }
       }
     },
-    [client, enabled, status],
+    [enabled],
   );
 
   useEffect(() => {
-    if (!enabled || !selectedAgentId || status !== "connected") {
+    if (!enabled || !selectedAgentId || statusRef.current !== "connected") {
       requestIdRef.current += 1;
       setSkillsReport(null);
       setSkillsAllowlist(undefined);

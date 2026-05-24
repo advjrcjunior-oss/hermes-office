@@ -9,7 +9,9 @@ const HOME = os.homedir();
 const TASKS_FILE = path.join(HOME, ".hermes", "jrc-operational-tasks.json");
 const BUDGET_FILE = path.join(HOME, ".hermes", "jrc-agent-budget.json");
 const OPS_MODE_FILE = path.join(HOME, ".hermes", "jrc-office-ops-mode.json");
+const COST_MODE_FILE = path.join(HOME, ".hermes", "jrc-office-cost-mode.json");
 const MEETINGS_FILE = path.join(HOME, ".hermes", "jrc-office-meetings.json");
+const TRACES_FILE = path.join(HOME, ".hermes", "jrc-office-traces.json");
 
 const HERMES_API_URL = (process.env.HERMES_API_URL || "http://127.0.0.1:18642").replace(/\/$/, "");
 const JRC_TASK_RUN_DAILY_LIMIT = Number.parseInt(process.env.JRC_TASK_RUN_DAILY_LIMIT || "6", 10);
@@ -20,6 +22,7 @@ const JRC_HUB_BASE_URL = (process.env.JRC_HUB_BASE_URL || "http://127.0.0.1:8150
 const JRC_HUB_MCP_READONLY_KEY = process.env.JRC_HUB_MCP_READONLY_KEY || "";
 
 const OPS_MODES = new Set(["manual", "assisted", "auto_safe"]);
+const COST_MODES = new Set(["economy", "balanced", "critical"]);
 
 type JsonRecord = Record<string, unknown>;
 
@@ -45,6 +48,9 @@ const writeJsonFile = (filePath: string, payload: JsonRecord) => {
 const normalizeMode = (value: unknown) =>
   typeof value === "string" && OPS_MODES.has(value) ? value : "assisted";
 
+const normalizeCostMode = (value: unknown) =>
+  typeof value === "string" && COST_MODES.has(value) ? value : "balanced";
+
 const loadOpsMode = () => {
   const parsed = readJsonFile(OPS_MODE_FILE);
   return {
@@ -68,6 +74,30 @@ const buildOpsModeStatus = () => ({
       ? "Modo visual em automatico seguro, mas auto-run global segue desligado no .env."
       : "",
 });
+
+const loadCostMode = () => {
+  const parsed = readJsonFile(COST_MODE_FILE);
+  const mode = normalizeCostMode(parsed?.mode);
+  return {
+    mode,
+    updatedAtMs: typeof parsed?.updatedAtMs === "number" ? parsed.updatedAtMs : 0,
+    updatedBy: typeof parsed?.updatedBy === "string" ? parsed.updatedBy : "system",
+    labels: {
+      economy: "Economia",
+      balanced: "Balanceado",
+      critical: "Critico",
+    },
+    routing: {
+      economy: "Prioriza Kimi/Ollama e evita Claude/Codex salvo pedido humano.",
+      balanced: "Usa Kimi para volume e Claude/Codex apenas em tarefas criticas do dominio.",
+      critical: "Permite motor forte para juridico sensivel, arquitetura e incidentes, sempre com budget.",
+    }[mode],
+    hardLocks: [
+      "Nao remove limite diario, cooldown ou aprovacao humana.",
+      "Nao autoriza protocolo/envio/contato/cobranca/deploy destrutivo.",
+    ],
+  };
+};
 
 const loadBudget = () => {
   const parsed = readJsonFile(BUDGET_FILE);
@@ -141,6 +171,59 @@ const loadTasks = () => {
     })
     .slice(0, 12);
   return { total: activeTasks.length, byStatus, byDomain, approval, next, approvals };
+};
+
+const loadTraces = () => {
+  const parsed = readJsonFile(TRACES_FILE);
+  const traces = Array.isArray(parsed?.traces)
+    ? parsed.traces.filter((trace): trace is JsonRecord =>
+        Boolean(trace && typeof trace === "object" && !Array.isArray(trace)),
+      )
+    : [];
+  return {
+    total: traces.length,
+    latest: traces.slice(0, 12),
+  };
+};
+
+const inferRiskLevel = (task: JsonRecord) => {
+  const approval = task.approval && typeof task.approval === "object" && !Array.isArray(task.approval)
+    ? (task.approval as JsonRecord)
+    : null;
+  const text = `${String(task.domain ?? "")} ${String(task.title ?? "")} ${String(task.description ?? "")}`.toLowerCase();
+  if (approval?.required || /protocol|enviar|peti|prazo|legalmail|cobran|contato|deploy destrutivo/.test(text)) {
+    return "high";
+  }
+  if (/marketing|meta|comercial|financeiro|cliente|lead|devops|vps|codigo/.test(text)) return "medium";
+  return "low";
+};
+
+const buildRiskStatus = (tasksStatus: ReturnType<typeof loadTasks>, budget: ReturnType<typeof loadBudget>, engines: JsonRecord) => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks)
+    ? parsed.tasks.filter((task): task is JsonRecord =>
+        Boolean(task && typeof task === "object" && !(task as JsonRecord).archived),
+      )
+    : [];
+  const highRiskTasks = tasks.filter((task) => task.riskLevel === "high" || inferRiskLevel(task) === "high");
+  const engineBlocked = Array.isArray(engines.blocked) ? engines.blocked.length : 0;
+  const flags = [];
+  if (tasksStatus.approval.pending) flags.push(`${tasksStatus.approval.pending} aprovacao(oes) humana(s) pendente(s)`);
+  if (tasksStatus.byStatus.blocked) flags.push(`${tasksStatus.byStatus.blocked} tarefa(s) bloqueada(s)`);
+  if (tasksStatus.byStatus.review) flags.push(`${tasksStatus.byStatus.review} tarefa(s) em revisao`);
+  if (budget.remainingTotal <= 1) flags.push("budget diario baixo");
+  if (engineBlocked) flags.push(`${engineBlocked} motor(es) bloqueado(s)`);
+  return {
+    level: flags.length ? "attention" : "normal",
+    pendingApprovals: tasksStatus.approval.pending,
+    blockedTasks: tasksStatus.byStatus.blocked || 0,
+    reviewTasks: tasksStatus.byStatus.review || 0,
+    highRiskTasks: highRiskTasks.length,
+    budgetRemaining: budget.remainingTotal,
+    engineBlocked,
+    hubFailures: 0,
+    flags,
+  };
 };
 
 const loadCadence = () => {
@@ -268,29 +351,37 @@ const buildEnginePolicy = () => ({
   ],
 });
 
-const buildOpsStatus = async () => ({
-  mode: buildOpsModeStatus(),
-  budget: loadBudget(),
-  engines: await fetchEngineUsage(),
-  enginePolicy: buildEnginePolicy(),
-  tasks: loadTasks(),
-  meetings: loadMeetings(),
-  cadence: loadCadence(),
-  today: loadToday(),
-  jrcHub: buildJrcHubStatus(),
-  safety: {
-    externalActionsLocked: true,
-    forbiddenWithoutApproval: [
-      "protocolar",
-      "enviar peticao",
-      "contatar terceiro",
-      "cobrar cliente",
-      "deploy destrutivo",
-    ],
-  },
-  source: "next-api",
-  updatedAtMs: Date.now(),
-});
+const buildOpsStatus = async () => {
+  const budget = loadBudget();
+  const engines = await fetchEngineUsage();
+  const tasks = loadTasks();
+  return {
+    mode: buildOpsModeStatus(),
+    costMode: loadCostMode(),
+    budget,
+    engines,
+    enginePolicy: buildEnginePolicy(),
+    tasks,
+    meetings: loadMeetings(),
+    cadence: loadCadence(),
+    today: loadToday(),
+    risk: buildRiskStatus(tasks, budget, engines),
+    traces: loadTraces(),
+    jrcHub: buildJrcHubStatus(),
+    safety: {
+      externalActionsLocked: true,
+      forbiddenWithoutApproval: [
+        "protocolar",
+        "enviar peticao",
+        "contatar terceiro",
+        "cobrar cliente",
+        "deploy destrutivo",
+      ],
+    },
+    source: "next-api",
+    updatedAtMs: Date.now(),
+  };
+};
 
 export async function GET() {
   try {
@@ -309,8 +400,23 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { action?: unknown; mode?: unknown };
     const action = typeof body.action === "string" ? body.action : "mode.set";
-    if (action !== "mode.set") {
-      return NextResponse.json({ error: "Fallback HTTP only supports mode.set. Connect gateway for team meetings." }, { status: 400 });
+    if (action !== "mode.set" && action !== "costMode.set") {
+      return NextResponse.json({ error: "Fallback HTTP only supports mode.set and costMode.set. Connect gateway for team meetings." }, { status: 400 });
+    }
+    if (action === "costMode.set") {
+      const mode = normalizeCostMode(body.mode);
+      if (body.mode !== mode) {
+        return NextResponse.json({ error: "Cost mode must be economy, balanced or critical." }, { status: 400 });
+      }
+      writeJsonFile(COST_MODE_FILE, {
+        version: 1,
+        mode,
+        updatedAtMs: Date.now(),
+        updatedBy: "operator",
+      });
+      return NextResponse.json(await buildOpsStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     const mode = normalizeMode(body.mode);
     if (body.mode !== mode) {

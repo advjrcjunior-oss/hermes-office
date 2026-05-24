@@ -681,6 +681,8 @@ export const useTaskBoardController = ({
     defaultTaskBoardPreference(),
   );
   const stateRef = useRef(state);
+  const clientRef = useRef(client);
+  const statusRef = useRef(status);
   const hydratedRef = useRef(false);
   const recoveredAgentRequestKeyRef = useRef<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -712,6 +714,11 @@ export const useTaskBoardController = ({
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    clientRef.current = client;
+    statusRef.current = status;
+  }, [client, status]);
 
   const archiveMatchingInferredCards = useCallback(
     (explicitCard: TaskBoardCard) => {
@@ -858,7 +865,7 @@ export const useTaskBoardController = ({
   }, [gatewayUrl, settingsCoordinator, state.cards, state.selectedCardId]);
 
   const refreshCronJobs = useCallback(async () => {
-    if (!cronEnabled || status !== "connected") {
+    if (!cronEnabled || statusRef.current !== "connected") {
       setCronJobs([]);
       setCronError(null);
       setCronLoading(false);
@@ -867,7 +874,7 @@ export const useTaskBoardController = ({
     setCronLoading(true);
     setCronError(null);
     try {
-      const result = await listCronJobs(client, { includeDisabled: true });
+      const result = await listCronJobs(clientRef.current, { includeDisabled: true });
       setCronJobs(result.jobs);
     } catch (error) {
       setCronError(
@@ -876,7 +883,7 @@ export const useTaskBoardController = ({
     } finally {
       setCronLoading(false);
     }
-  }, [client, cronEnabled, status]);
+  }, [cronEnabled]);
 
   const refreshSharedTasks = useCallback(async () => {
     if (!sharedTasksSupported) {
@@ -913,7 +920,7 @@ export const useTaskBoardController = ({
   }, [applySharedTaskRecord, sharedTasksSupported]);
 
   const refreshRemoteTasks = useCallback(async () => {
-    if (status !== "connected") {
+    if (statusRef.current !== "connected") {
       setGatewayTasksLoading(false);
       setGatewayTasksError(null);
       return;
@@ -921,7 +928,7 @@ export const useTaskBoardController = ({
     setGatewayTasksLoading(true);
     setGatewayTasksError(null);
     try {
-      const result = await listGatewayTasks(client, { includeArchived: true });
+      const result = await listGatewayTasks(clientRef.current, { includeArchived: true });
       setGatewayTasksSupported("supported");
       for (const task of result.tasks) {
         applyGatewayTaskRecord(task);
@@ -940,7 +947,7 @@ export const useTaskBoardController = ({
     } finally {
       setGatewayTasksLoading(false);
     }
-  }, [applyGatewayTaskRecord, client, status]);
+  }, [applyGatewayTaskRecord]);
 
   useEffect(() => {
     void refreshCronJobs();

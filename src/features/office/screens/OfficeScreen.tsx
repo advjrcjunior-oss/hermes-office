@@ -1315,11 +1315,18 @@ export function OfficeScreen({
   }, [state.agents]);
   useEffect(() => {
     const now = Date.now();
-    setDanceUntilByAgentId((previous) =>
-      Object.fromEntries(
+    setDanceUntilByAgentId((previous) => {
+      const next = Object.fromEntries(
         Object.entries(previous).filter(([, until]) => until > now),
-      ),
-    );
+      );
+      if (
+        Object.keys(previous).length === Object.keys(next).length &&
+        Object.keys(previous).every((key) => previous[key] === next[key])
+      ) {
+        return previous;
+      }
+      return next;
+    });
   }, [state.agents]);
   useEffect(() => {
     return () => {
@@ -2732,6 +2739,18 @@ export function OfficeScreen({
     [requestAgentHistoryRefresh],
   );
 
+  const loadAgentsRef = useRef(loadAgents);
+  const requestAgentHistoryRefreshRef = useRef(requestAgentHistoryRefresh);
+  const refreshRecentTransportSessionHistoryRef = useRef(refreshRecentTransportSessionHistory);
+  const clientRef = useRef(client);
+
+  useEffect(() => {
+    loadAgentsRef.current = loadAgents;
+    requestAgentHistoryRefreshRef.current = requestAgentHistoryRefresh;
+    refreshRecentTransportSessionHistoryRef.current = refreshRecentTransportSessionHistory;
+    clientRef.current = client;
+  }, [client, loadAgents, refreshRecentTransportSessionHistory, requestAgentHistoryRefresh]);
+
   useEffect(() => {
     if (status !== "connected" || agentsLoaded) return;
     void loadAgents({ forceSettings: true });
@@ -2871,13 +2890,13 @@ export function OfficeScreen({
       },
       clearPendingLivePatch: () => {},
       loadSummarySnapshot: async () => {
-        await loadAgents({
+        await loadAgentsRef.current({
           minIntervalMs: 3_000,
           settingsMaxAgeMs: 60_000,
           silent: true,
         });
       },
-      requestHistoryRefresh: requestAgentHistoryRefresh,
+      requestHistoryRefresh: (params) => requestAgentHistoryRefreshRef.current(params),
       refreshHeartbeatLatestUpdate: () => {},
       bumpHeartbeatTick: () => {},
       setTimeout: (fn, delayMs) => window.setTimeout(fn, delayMs),
@@ -2887,22 +2906,13 @@ export function OfficeScreen({
       updateSpecialLatestUpdate: () => {},
     });
 
-    // Run reconciliation before subscribing to events so dedup keys are
-    // populated in the trigger state. This prevents stale gateway event
-    // replays from setting timed room holds on page load.
-    setOfficeTriggerState((previous) =>
-      reconcileOfficeAnimationTriggerState({
-        state: previous,
-        agents: stateRef.current.agents,
-      }),
-    );
-    const unsubscribeEvent = client.onEvent((event) => {
+    const unsubscribeEvent = clientRef.current.onEvent((event) => {
       lastGatewayActivityAtRef.current = Date.now();
       setOpenClawLogEntries((previous) => {
         const next = [...previous, formatOpenClawEventLogEntry(event)];
         return next.slice(-MAX_OPENCLAW_LOG_ENTRIES);
       });
-      refreshRecentTransportSessionHistory(event);
+      refreshRecentTransportSessionHistoryRef.current(event);
       setOfficeTriggerState((previous) =>
         reduceOfficeAnimationTriggerEvent({
           state: previous,
@@ -2932,8 +2942,8 @@ export function OfficeScreen({
       taskBoardEventHandlerRef.current(event);
       runtimeHandler.handleEvent(event);
     });
-    const unsubscribeGap = client.onGap(() => {
-      void loadAgents({
+    const unsubscribeGap = clientRef.current.onGap(() => {
+      void loadAgentsRef.current({
         minIntervalMs: 5_000,
         settingsMaxAgeMs: 30_000,
         silent: true,
@@ -2948,12 +2958,8 @@ export function OfficeScreen({
     };
   }, [
     agentsLoaded,
-    client,
     debugEnabled,
     dispatch,
-    loadAgents,
-    refreshRecentTransportSessionHistory,
-    requestAgentHistoryRefresh,
     status,
   ]);
 
@@ -2991,14 +2997,25 @@ export function OfficeScreen({
     };
   }, [agentsLoaded, loadAgents, status]);
 
+  const officeTriggerAgentKey = useMemo(
+    () =>
+      state.agents
+        .map((agent) => `${agent.agentId}:${agent.status}:${agent.runId ?? ""}:${agent.lastUserMessage ?? ""}`)
+        .join("|"),
+    [state.agents],
+  );
+
   useEffect(() => {
     setOfficeTriggerState((previous) =>
-      reconcileOfficeAnimationTriggerState({
-        state: previous,
-        agents: state.agents,
-      }),
+      {
+        const next = reconcileOfficeAnimationTriggerState({
+          state: previous,
+          agents: stateRef.current.agents,
+        });
+        return JSON.stringify(next) === JSON.stringify(previous) ? previous : next;
+      },
     );
-  }, [state.agents]);
+  }, [officeTriggerAgentKey]);
 
   useEffect(() => {
     setMarketplaceGymHoldByAgentId((previous) => {
@@ -3055,11 +3072,12 @@ export function OfficeScreen({
           {},
         );
         if (!cancelled) {
-          setGatewayModels(
-            buildGatewayModelChoices(
+          const nextModels = buildGatewayModelChoices(
               Array.isArray(result.models) ? result.models : [],
               null,
-            ),
+          );
+          setGatewayModels((current) =>
+            JSON.stringify(current) === JSON.stringify(nextModels) ? current : nextModels,
           );
         }
       } catch {

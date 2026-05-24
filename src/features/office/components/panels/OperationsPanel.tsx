@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GatewayClient, GatewayStatus } from "@/lib/gateway/GatewayClient";
 
 type OpsMode = "manual" | "assisted" | "auto_safe";
+type CostMode = "economy" | "balanced" | "critical";
 
 type OpsStatus = {
   mode?: {
@@ -12,6 +13,12 @@ type OpsStatus = {
     externalActionsLocked?: boolean;
     autoRunEnabled?: boolean;
     note?: string;
+  };
+  costMode?: {
+    mode?: CostMode;
+    labels?: Record<string, string>;
+    routing?: string;
+    hardLocks?: string[];
   };
   budget?: {
     totalRuns?: number;
@@ -49,6 +56,9 @@ type OpsStatus = {
       priority: string;
       domain: string;
       assignedAgentId?: string;
+      riskLevel?: string;
+      traceId?: string | null;
+      qualityScore?: { score?: number; verdict?: string; checks?: string[] };
       approval?: { status?: string; reason?: string; required?: boolean };
     }>;
     approvals?: Array<{
@@ -58,7 +68,37 @@ type OpsStatus = {
       priority: string;
       domain: string;
       assignedAgentId?: string;
+      riskLevel?: string;
+      traceId?: string | null;
+      qualityScore?: { score?: number; verdict?: string; checks?: string[] };
       approval?: { status?: string; reason?: string; required?: boolean };
+    }>;
+  };
+  risk?: {
+    level?: string;
+    pendingApprovals?: number;
+    blockedTasks?: number;
+    reviewTasks?: number;
+    highRiskTasks?: number;
+    budgetRemaining?: number;
+    engineBlocked?: number;
+    hubFailures?: number;
+    flags?: string[];
+  };
+  traces?: {
+    total?: number;
+    latest?: Array<{
+      id?: string;
+      kind?: string;
+      status?: string;
+      taskId?: string | null;
+      meetingId?: string | null;
+      agentId?: string | null;
+      domain?: string | null;
+      engine?: string | null;
+      riskLevel?: string | null;
+      qualityScore?: { score?: number; verdict?: string; checks?: string[] } | null;
+      message?: string;
     }>;
   };
   meetings?: {
@@ -136,6 +176,24 @@ const MODE_OPTIONS: Array<{ id: OpsMode; label: string; description: string }> =
   },
 ];
 
+const COST_MODE_OPTIONS: Array<{ id: CostMode; label: string; description: string }> = [
+  {
+    id: "economy",
+    label: "Economia",
+    description: "Volume e triagem em Kimi/Ollama; motores fortes so quando voce pedir.",
+  },
+  {
+    id: "balanced",
+    label: "Balanceado",
+    description: "Roteamento normal: custo baixo no volume, Claude/Codex para tarefas criticas.",
+  },
+  {
+    id: "critical",
+    label: "Critico",
+    description: "Prioriza qualidade para incidentes, arquitetura e juridico sensivel, ainda com budget.",
+  },
+];
+
 const formatNumber = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value) ? String(value) : "0";
 
@@ -155,20 +213,30 @@ export function OperationsPanel({
   client: GatewayClient;
   status: GatewayStatus;
 }) {
+  const clientRef = useRef(client);
+  const statusRef = useRef(status);
   const [snapshot, setSnapshot] = useState<OpsStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingMode, setSavingMode] = useState<OpsMode | null>(null);
+  const [savingCostMode, setSavingCostMode] = useState<CostMode | null>(null);
   const [meetingGoal, setMeetingGoal] = useState("Priorizar o dia da JRC e delegar proximas tarefas com safety locks.");
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    clientRef.current = client;
+    statusRef.current = status;
+  }, [client, status]);
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      const currentStatus = statusRef.current;
+      const currentClient = clientRef.current;
       const result =
-        status === "connected"
-          ? await client.call<OpsStatus>("ops.status", {})
+        currentStatus === "connected"
+          ? await currentClient.call<OpsStatus>("ops.status", {})
           : await fetch("/api/office/ops", { cache: "no-store" }).then(async (response) => {
               const payload = (await response.json()) as OpsStatus & { error?: string };
               if (!response.ok) throw new Error(payload.error || "Failed to load operations status.");
@@ -190,7 +258,7 @@ export function OperationsPanel({
     } finally {
       setLoading(false);
     }
-  }, [client, status]);
+  }, []);
 
   useEffect(() => {
     void loadStatus();
@@ -243,6 +311,47 @@ export function OperationsPanel({
       }
     },
     [client, loadStatus, status],
+  );
+
+  const handleCostModeChange = useCallback(
+    async (mode: CostMode) => {
+      setSavingCostMode(mode);
+      setError(null);
+      try {
+        const result =
+          status === "connected"
+            ? await client.call<OpsStatus>("ops.costMode.set", { mode }).then(async () => client.call<OpsStatus>("ops.status", {}))
+            : await fetch("/api/office/ops", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "costMode.set", mode }),
+              }).then(async (response) => {
+                const payload = (await response.json()) as OpsStatus & { error?: string };
+                if (!response.ok) throw new Error(payload.error || "Failed to save cost mode.");
+                return payload;
+              });
+        setSnapshot(result);
+      } catch (err) {
+        try {
+          const fallback = await fetch("/api/office/ops", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "costMode.set", mode }),
+          }).then(async (response) => {
+            const payload = (await response.json()) as OpsStatus & { error?: string };
+            if (!response.ok) throw new Error(payload.error || "Failed to save cost mode.");
+            return payload;
+          });
+          setSnapshot(fallback);
+          setError(null);
+        } catch (fallbackErr) {
+          setError(fallbackErr instanceof Error ? fallbackErr.message : "Failed to save cost mode.");
+        }
+      } finally {
+        setSavingCostMode(null);
+      }
+    },
+    [client, status],
   );
 
   const runGatewayAction = useCallback(
@@ -318,6 +427,7 @@ export function OperationsPanel({
   );
 
   const currentMode = snapshot?.mode?.mode ?? "assisted";
+  const currentCostMode = snapshot?.costMode?.mode ?? "balanced";
   const engineEntries = useMemo(
     () => sortRecordEntries(snapshot?.engines?.engines),
     [snapshot?.engines?.engines],
@@ -396,6 +506,74 @@ export function OperationsPanel({
               {snapshot.mode.note}
             </div>
           ) : null}
+        </section>
+
+        <section className="mt-3 rounded border border-emerald-400/15 bg-emerald-950/10 p-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-emerald-100/75">
+            Modo de custo
+          </div>
+          <div className="mt-3 grid gap-2">
+            {COST_MODE_OPTIONS.map((mode) => {
+              const active = currentCostMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => void handleCostModeChange(mode.id)}
+                  disabled={savingCostMode !== null}
+                  className={`rounded border px-3 py-2 text-left transition ${
+                    active
+                      ? "border-emerald-300/40 bg-emerald-500/12 text-emerald-50"
+                      : "border-white/10 bg-black/20 text-white/65 hover:border-emerald-400/25 hover:text-white"
+                  }`}
+                >
+                  <div className="font-mono text-[11px] uppercase tracking-[0.14em]">
+                    {savingCostMode === mode.id ? "Salvando..." : mode.label}
+                  </div>
+                  <div className="mt-1 text-[11px] leading-4 text-white/45">{mode.description}</div>
+                </button>
+              );
+            })}
+          </div>
+          {snapshot?.costMode?.routing ? (
+            <div className="mt-3 rounded border border-white/10 bg-black/20 px-2 py-2 text-[11px] leading-4 text-white/55">
+              {snapshot.costMode.routing}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="mt-3 rounded border border-amber-400/20 bg-amber-500/8 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-100/80">
+              Risco operacional
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-amber-100/55">
+              {snapshot?.risk?.level ?? "normal"}
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-4 gap-1.5">
+            {[
+              ["OK?", snapshot?.risk?.pendingApprovals],
+              ["Block", snapshot?.risk?.blockedTasks],
+              ["Review", snapshot?.risk?.reviewTasks],
+              ["Alto", snapshot?.risk?.highRiskTasks],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="rounded border border-amber-300/15 bg-black/20 px-1.5 py-1.5 text-center">
+                <div className="font-mono text-[8px] uppercase text-amber-100/40">{label}</div>
+                <div className="mt-0.5 text-sm font-semibold text-white">{formatNumber(value)}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {(snapshot?.risk?.flags ?? []).slice(0, 5).map((flag) => (
+              <span key={flag} className="rounded border border-amber-300/15 bg-black/20 px-2 py-1 text-[10px] text-amber-100/70">
+                {flag}
+              </span>
+            ))}
+            {(snapshot?.risk?.flags ?? []).length === 0 ? (
+              <span className="text-[11px] text-white/35">Sem alertas criticos no snapshot atual.</span>
+            ) : null}
+          </div>
         </section>
 
         <section className="mt-3 rounded border border-white/10 bg-white/[0.03] p-3">
@@ -660,6 +838,12 @@ export function OperationsPanel({
                 <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
                   {task.priority} / {task.domain} / {task.status}
                 </div>
+                {task.qualityScore?.score !== undefined || task.traceId ? (
+                  <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.08em] text-cyan-100/55">
+                    {task.qualityScore?.score !== undefined ? `Score ${task.qualityScore.score}` : "Sem score"} /{" "}
+                    {task.traceId ?? "sem trace"}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -681,6 +865,11 @@ export function OperationsPanel({
                 <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
                   {task.priority} / {task.domain} / {task.assignedAgentId ?? "sem agente"}
                 </div>
+                {task.qualityScore?.score !== undefined || task.riskLevel ? (
+                  <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.08em] text-amber-100/50">
+                    Score {task.qualityScore?.score ?? "--"} / risco {task.riskLevel ?? "n/a"}
+                  </div>
+                ) : null}
                 {task.approval?.reason ? (
                   <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-amber-100/65">{task.approval.reason}</div>
                 ) : null}
@@ -714,6 +903,40 @@ export function OperationsPanel({
             ))}
             {(snapshot?.tasks?.approvals ?? []).length === 0 ? (
               <div className="text-[11px] text-white/35">Nenhuma aprovacao pendente.</div>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="mt-3 rounded border border-white/10 bg-white/[0.03] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-white/55">
+              Auditoria e traces
+            </div>
+            <div className="font-mono text-[10px] text-white/35">
+              {formatNumber(snapshot?.traces?.total)} eventos
+            </div>
+          </div>
+          <div className="mt-3 space-y-2">
+            {(snapshot?.traces?.latest ?? []).slice(0, 6).map((trace) => (
+              <div key={trace.id} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate font-mono text-[10px] uppercase tracking-[0.1em] text-cyan-100/70">
+                    {trace.kind} / {trace.status}
+                  </div>
+                  <div className="font-mono text-[10px] text-white/35">
+                    {trace.qualityScore?.score !== undefined ? `score ${trace.qualityScore.score}` : trace.riskLevel ?? "trace"}
+                  </div>
+                </div>
+                <div className="mt-1 truncate text-[11px] text-white/45">
+                  {trace.agentId ?? "sistema"} / {trace.domain ?? "geral"} / {trace.taskId ?? trace.meetingId ?? trace.id}
+                </div>
+                {trace.message ? (
+                  <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-white/35">{trace.message}</div>
+                ) : null}
+              </div>
+            ))}
+            {(snapshot?.traces?.latest ?? []).length === 0 ? (
+              <div className="text-[11px] text-white/35">Nenhum trace registrado ainda.</div>
             ) : null}
           </div>
         </section>

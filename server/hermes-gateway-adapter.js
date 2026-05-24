@@ -584,11 +584,15 @@ const HISTORY_FILE = path.join(HOME, ".hermes", "clawd3d-history.json");
 const TASKS_FILE = path.join(HOME, ".hermes", "jrc-operational-tasks.json");
 const BUDGET_FILE = path.join(HOME, ".hermes", "jrc-agent-budget.json");
 const OPS_MODE_FILE = path.join(HOME, ".hermes", "jrc-office-ops-mode.json");
+const COST_MODE_FILE = path.join(HOME, ".hermes", "jrc-office-cost-mode.json");
 const MEETINGS_FILE = path.join(HOME, ".hermes", "jrc-office-meetings.json");
+const TRACES_FILE = path.join(HOME, ".hermes", "jrc-office-traces.json");
 let persistDebounceTimer = null;
 let tasksPersistDebounceTimer = null;
 let budgetPersistDebounceTimer = null;
 let opsModePersistDebounceTimer = null;
+let costModePersistDebounceTimer = null;
+let tracesPersistDebounceTimer = null;
 let taskRunInFlight = false;
 
 function loadHistoryFromDisk() {
@@ -1174,13 +1178,40 @@ async function runOperationalTask(taskId, sendEvent) {
   if (!agentRegistry.has(task.assignedAgentId)) {
     throw new Error(`Assigned agent ${task.assignedAgentId} not found`);
   }
+  const agent = agentRegistry.get(task.assignedAgentId);
+  const engine = agent?.settings?.model || HERMES_MODEL;
+  const riskLevel = inferRiskLevel(task);
+  const handoff = buildHandoffContract(task, { riskLevel });
+  const startedTrace = recordTrace({
+    kind: "task.run",
+    status: "started",
+    taskId: task.id,
+    agentId: task.assignedAgentId,
+    domain: task.domain,
+    engine,
+    riskLevel,
+    handoff,
+    message: `Execucao iniciada: ${task.title}`,
+  });
   const budget = checkTaskRunBudget(task);
   if (!budget.ok) {
     recordTaskRunBudget(task, "blocked", budget.reason);
+    recordTrace({
+      kind: "task.run",
+      status: "blocked_budget",
+      taskId: task.id,
+      agentId: task.assignedAgentId,
+      domain: task.domain,
+      engine,
+      riskLevel,
+      handoff,
+      message: budget.reason,
+    });
     return {
       task: serializeTask(task),
       blockedByBudget: true,
       budget,
+      traceId: startedTrace.id,
       message: `Execucao bloqueada pelo budget anti-consumo: ${budget.reason}`,
     };
   }
@@ -1205,7 +1236,6 @@ async function runOperationalTask(taskId, sendEvent) {
       started.notes?.length ? `Notas existentes:\n- ${started.notes.slice(-6).join("\n- ")}` : "",
     ].filter(Boolean).join("\n\n");
 
-    const agent = agentRegistry.get(started.assignedAgentId);
     const sessionKey = `agent:${started.assignedAgentId}:${MAIN_KEY}`;
     const history = getHistory(sessionKey);
     const messages = [
@@ -1216,15 +1246,37 @@ async function runOperationalTask(taskId, sendEvent) {
 
     let responseText = "";
     try {
-      const result = await completeOneTurn(messages, agent.settings.model || HERMES_MODEL, []);
+      const result = await completeOneTurn(messages, engine, []);
       responseText = result.textContent || "";
     } catch (error) {
+      recordTrace({
+        kind: "task.run",
+        status: "error",
+        taskId: task.id,
+        agentId: started.assignedAgentId,
+        domain: started.domain,
+        engine,
+        riskLevel,
+        handoff,
+        message: sanitizeErrorMessage(error),
+      });
       return updateOperationalTask(task.id, {
         status: "blocked",
         note: `Falha na execucao interna: ${sanitizeErrorMessage(error)}`,
       });
     }
     if (!responseText.trim()) {
+      recordTrace({
+        kind: "task.run",
+        status: "empty_response",
+        taskId: task.id,
+        agentId: started.assignedAgentId,
+        domain: started.domain,
+        engine,
+        riskLevel,
+        handoff,
+        message: "Resposta vazia do agente.",
+      });
       return updateOperationalTask(task.id, {
         status: "blocked",
         note: "Falha na execucao interna: resposta vazia do agente.",
@@ -1238,8 +1290,25 @@ async function runOperationalTask(taskId, sendEvent) {
     }
 
     const finalStatus = started.approval?.required ? "review" : "done";
+    const qualityScore = buildQualityScore(started, responseText);
+    const completedTrace = recordTrace({
+      kind: "task.run",
+      status: finalStatus,
+      taskId: task.id,
+      agentId: started.assignedAgentId,
+      domain: started.domain,
+      engine,
+      riskLevel,
+      qualityScore,
+      handoff,
+      message: responseText,
+    });
     const completed = updateOperationalTask(task.id, {
       status: finalStatus,
+      traceId: completedTrace.id,
+      handoff,
+      riskLevel,
+      qualityScore,
       note: `Resposta de ${started.assignedAgentId}:\n${responseText.slice(0, 6000)}`,
     });
     const unblocked = finalStatus === "done" ? unblockNextPlaybookTask(completed) : null;
@@ -1253,7 +1322,7 @@ async function runOperationalTask(taskId, sendEvent) {
         },
       },
     });
-    return { task: completed, unblocked, budget: getBudgetStatus() };
+    return { task: completed, unblocked, budget: getBudgetStatus(), traceId: completedTrace.id, qualityScore };
   } finally {
     taskRunInFlight = false;
   }
@@ -1833,6 +1902,16 @@ async function handleMethod(method, params, id, sendEvent) {
         return resErr(id, "INVALID_REQUEST", sanitizeErrorMessage(error));
       }
 
+    case "ops.costMode.set":
+      try {
+        return resOk(id, setCostMode(p.mode));
+      } catch (error) {
+        return resErr(id, "INVALID_REQUEST", sanitizeErrorMessage(error));
+      }
+
+    case "ops.traces.list":
+      return resOk(id, summarizeTraces(Number(p.limit || 20)));
+
     case "ops.report.write":
       try {
         return resOk(id, writeEndOfDayReport({ dryRun: p.dryRun }));
@@ -1984,7 +2063,7 @@ function startAdapter() {
               "meetings.list","meetings.start",
               "playbooks.list","playbooks.start",
               "budget.status","budget.reset",
-              "ops.status","ops.mode.set","ops.report.write",
+              "ops.status","ops.mode.set","ops.costMode.set","ops.traces.list","ops.report.write",
               "jrcHub.status","jrcHub.syncTriggers",
               "cron.list","cron.add","cron.remove","cron.patch","cron.run"],
               events: ["chat","presence","heartbeat","cron","task"] },
@@ -2139,8 +2218,15 @@ function recordTaskRunBudget(task, status, detail = "") {
 loadBudgetFromDisk();
 
 const OPS_MODES = new Set(["manual", "assisted", "auto_safe"]);
+const COST_MODES = new Set(["economy", "balanced", "critical"]);
 let opsModeState = {
   mode: "assisted",
+  updatedAtMs: 0,
+  updatedBy: "system",
+};
+
+let costModeState = {
+  mode: "balanced",
   updatedAtMs: 0,
   updatedBy: "system",
 };
@@ -2148,6 +2234,11 @@ let opsModeState = {
 let meetingState = {
   version: 1,
   meetings: [],
+};
+
+let traceState = {
+  version: 1,
+  traces: [],
 };
 
 function loadOpsModeFromDisk() {
@@ -2206,6 +2297,185 @@ function getOpsModeStatus() {
       opsModeState.mode === "auto_safe" && !JRC_AUTO_RUN_ENABLED
         ? "Modo visual em automatico seguro, mas auto-run global segue desligado no .env."
         : "",
+  };
+}
+
+function loadCostModeFromDisk() {
+  try {
+    if (!fs.existsSync(COST_MODE_FILE)) return;
+    const parsed = JSON.parse(fs.readFileSync(COST_MODE_FILE, "utf8"));
+    if (!parsed || typeof parsed !== "object") return;
+    costModeState = {
+      mode: COST_MODES.has(parsed.mode) ? parsed.mode : costModeState.mode,
+      updatedAtMs: Number(parsed.updatedAtMs || 0),
+      updatedBy: typeof parsed.updatedBy === "string" ? parsed.updatedBy : "system",
+    };
+  } catch (error) {
+    console.warn("[hermes-adapter] Failed to load cost mode:", sanitizeErrorMessage(error));
+  }
+}
+
+function saveCostModeToDisk() {
+  clearTimeout(costModePersistDebounceTimer);
+  costModePersistDebounceTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(COST_MODE_FILE), { recursive: true });
+      fs.writeFileSync(COST_MODE_FILE, JSON.stringify({ version: 1, ...costModeState }, null, 2), "utf8");
+    } catch (error) {
+      console.warn("[hermes-adapter] Failed to save cost mode:", sanitizeErrorMessage(error));
+    }
+  }, 100);
+}
+
+function setCostMode(mode) {
+  const normalized = typeof mode === "string" ? mode.trim() : "";
+  if (!COST_MODES.has(normalized)) {
+    throw new Error("Cost mode must be economy, balanced or critical.");
+  }
+  costModeState = {
+    mode: normalized,
+    updatedAtMs: Date.now(),
+    updatedBy: "operator",
+  };
+  saveCostModeToDisk();
+  return getCostModeStatus();
+}
+
+function getCostModeStatus() {
+  return {
+    ...costModeState,
+    labels: {
+      economy: "Economia",
+      balanced: "Balanceado",
+      critical: "Critico",
+    },
+    routing: {
+      economy: "Prioriza Kimi/Ollama e evita Claude/Codex salvo pedido humano.",
+      balanced: "Usa Kimi para volume e Claude/Codex apenas em tarefas criticas do dominio.",
+      critical: "Permite motor forte para juridico sensivel, arquitetura e incidentes, sempre com budget.",
+    }[costModeState.mode],
+    hardLocks: [
+      "Nao remove limite diario, cooldown ou aprovacao humana.",
+      "Nao autoriza protocolo/envio/contato/cobranca/deploy destrutivo.",
+    ],
+  };
+}
+
+function loadTracesFromDisk() {
+  try {
+    if (!fs.existsSync(TRACES_FILE)) return;
+    const parsed = JSON.parse(fs.readFileSync(TRACES_FILE, "utf8"));
+    if (!parsed || typeof parsed !== "object") return;
+    const traces = Array.isArray(parsed.traces) ? parsed.traces : [];
+    traceState = {
+      version: 1,
+      traces: traces.filter((trace) => trace && typeof trace === "object").slice(0, 200),
+    };
+  } catch (error) {
+    console.warn("[hermes-adapter] Failed to load traces:", sanitizeErrorMessage(error));
+  }
+}
+
+function saveTracesToDisk() {
+  clearTimeout(tracesPersistDebounceTimer);
+  tracesPersistDebounceTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(TRACES_FILE), { recursive: true });
+      fs.writeFileSync(TRACES_FILE, JSON.stringify(traceState, null, 2), "utf8");
+    } catch (error) {
+      console.warn("[hermes-adapter] Failed to save traces:", sanitizeErrorMessage(error));
+    }
+  }, 100);
+}
+
+function inferRiskLevel(task, text = "") {
+  const combined = `${task?.domain || ""} ${task?.title || ""} ${task?.description || ""} ${text}`.toLowerCase();
+  if (task?.approval?.required || /protocol|enviar|peti|prazo|legalmail|cobran|contato|deploy destrutivo/.test(combined)) {
+    return "high";
+  }
+  if (/marketing|meta|comercial|financeiro|cliente|lead|devops|vps|codigo/.test(combined)) return "medium";
+  return "low";
+}
+
+function buildHandoffContract(task, extra = {}) {
+  return {
+    objetivo: task.title,
+    entrada: task.description || "Contexto operacional registrado na fila Hermes Office.",
+    saidaEsperada: "Resultado interno, proximos passos, riscos e dependencias de aprovacao humana.",
+    responsavel: task.assignedAgentId || "unassigned",
+    dominio: task.domain || "geral",
+    risco: extra.riskLevel || inferRiskLevel(task),
+    precisaAprovacao: Boolean(task.approval?.required),
+    criterioDePronto: task.approval?.required
+      ? "Artefato pronto para revisao humana, sem executar ato externo."
+      : "Artefato interno concluido sem ato externo.",
+  };
+}
+
+function buildQualityScore(task, responseText = "") {
+  const text = responseText.toLowerCase();
+  let score = 70;
+  const checks = [];
+  if (/risco|riscos|aten[cç][aã]o|bloqueio/.test(text)) {
+    score += 8;
+    checks.push("riscos");
+  }
+  if (/pr[oó]ximo|proximos|passo|checklist|pend[eê]ncia/.test(text)) {
+    score += 8;
+    checks.push("proximos_passos");
+  }
+  if (/aprova[cç][aã]o humana|depende de aprova[cç][aã]o|sem aprova[cç][aã]o/.test(text)) {
+    score += 8;
+    checks.push("aprovacao");
+  }
+  if (responseText.trim().length > 700) {
+    score += 6;
+    checks.push("substancia");
+  }
+  if (/protocol(ei|ado|ar)|enviei|enviado|contatei|cobrei|deploy executado/.test(text)) {
+    score -= 30;
+    checks.push("possivel_acao_externa");
+  }
+  if (task.approval?.required && !/aprova[cç][aã]o|revis[aã]o|humana/.test(text)) {
+    score -= 12;
+    checks.push("aprovacao_pouco_explicita");
+  }
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    checks,
+    verdict: score >= 90 ? "forte" : score >= 75 ? "bom" : score >= 60 ? "revisar" : "bloquear",
+  };
+}
+
+function recordTrace(input = {}) {
+  const trace = {
+    id: typeof input.id === "string" ? input.id : `trace-${todayKey()}-${randomId()}`,
+    kind: typeof input.kind === "string" ? input.kind : "event",
+    status: typeof input.status === "string" ? input.status : "ok",
+    taskId: typeof input.taskId === "string" ? input.taskId : null,
+    meetingId: typeof input.meetingId === "string" ? input.meetingId : null,
+    agentId: typeof input.agentId === "string" ? input.agentId : null,
+    domain: typeof input.domain === "string" ? input.domain : null,
+    engine: typeof input.engine === "string" ? input.engine : null,
+    riskLevel: typeof input.riskLevel === "string" ? input.riskLevel : null,
+    qualityScore: input.qualityScore && typeof input.qualityScore === "object" ? input.qualityScore : null,
+    handoff: input.handoff && typeof input.handoff === "object" ? input.handoff : null,
+    message: typeof input.message === "string" ? input.message.slice(0, 1200) : "",
+    occurredAt: nowIso(),
+    occurredAtMs: Date.now(),
+  };
+  traceState = {
+    version: 1,
+    traces: [trace, ...traceState.traces].slice(0, 200),
+  };
+  saveTracesToDisk();
+  return trace;
+}
+
+function summarizeTraces(limit = 12) {
+  return {
+    total: traceState.traces.length,
+    latest: traceState.traces.slice(0, limit),
   };
 }
 
@@ -2367,6 +2637,15 @@ function startTeamMeeting(input = {}) {
     version: 1,
     meetings: [meeting, ...meetingState.meetings].slice(0, 50),
   };
+  recordTrace({
+    kind: "meeting.start",
+    status: "planned",
+    meetingId,
+    agentId: "jrc-maestro",
+    domain,
+    riskLevel: inferRiskLevel({ domain, title: goal, approval: { required: createdTasks.some((task) => task.approval?.required) } }),
+    message: goal,
+  });
   saveMeetingsToDisk();
   return { meeting, createdTasks };
 }
@@ -2406,6 +2685,8 @@ function getEnginePolicyStatus() {
 }
 
 loadMeetingsFromDisk();
+loadCostModeFromDisk();
+loadTracesFromDisk();
 
 function summarizeOperationalTasks() {
   const tasks = listTasks(false);
@@ -2482,6 +2763,40 @@ function getTodayPanelStatus() {
   };
 }
 
+function getRiskPanelStatus(engineUsage = null, hubStatus = null) {
+  const tasks = listTasks(false);
+  const budget = getBudgetStatus();
+  const pendingApprovals = tasks.filter((task) => task.approval?.status === "pending");
+  const blockedTasks = tasks.filter((task) => task.status === "blocked");
+  const reviewTasks = tasks.filter((task) => task.status === "review");
+  const highRiskTasks = tasks.filter((task) => task.riskLevel === "high" || inferRiskLevel(task) === "high");
+  const blockedEngines = Array.isArray(engineUsage?.blocked) ? engineUsage.blocked.length : 0;
+  const hubFailures = hubStatus?.sources
+    ? Object.values(hubStatus.sources).filter((source) => !source?.ok).length
+    : hubStatus?.ok === false ? 1 : 0;
+  const flags = [];
+  if (pendingApprovals.length) flags.push(`${pendingApprovals.length} aprovacao(oes) humana(s) pendente(s)`);
+  if (blockedTasks.length) flags.push(`${blockedTasks.length} tarefa(s) bloqueada(s)`);
+  if (reviewTasks.length) flags.push(`${reviewTasks.length} tarefa(s) em revisao`);
+  if (budget.remainingTotal <= 1) flags.push("budget diario baixo");
+  if (blockedEngines) flags.push(`${blockedEngines} motor(es) bloqueado(s)`);
+  if (hubFailures) flags.push(`${hubFailures} fonte(s) JRC Hub com falha`);
+  const level = flags.some((flag) => /aprovacao|bloqueada|budget|motor/.test(flag))
+    ? "attention"
+    : "normal";
+  return {
+    level,
+    pendingApprovals: pendingApprovals.length,
+    blockedTasks: blockedTasks.length,
+    reviewTasks: reviewTasks.length,
+    highRiskTasks: highRiskTasks.length,
+    budgetRemaining: budget.remainingTotal,
+    engineBlocked: blockedEngines,
+    hubFailures,
+    flags,
+  };
+}
+
 async function runOperationalChain(options = {}, sendEvent) {
   const maxSteps = Math.max(1, Math.min(5, Number(options.maxSteps || 3)));
   const domain = typeof options.domain === "string" ? options.domain.trim() : "";
@@ -2510,6 +2825,9 @@ function buildEndOfDayReport() {
     meetings: summarizeMeetings(),
     cadence: getOpsCadenceStatus(),
     today: getTodayPanelStatus(),
+    costMode: getCostModeStatus(),
+    risk: getRiskPanelStatus(),
+    traces: summarizeTraces(5),
   };
   const lines = [
     `# Hermes Office - Relatorio operacional ${todayKey()}`,
@@ -2522,6 +2840,8 @@ function buildEndOfDayReport() {
     `- Aprovacoes pendentes: ${ops.today.workflow.approvals}`,
     `- Reunioes T0 registradas: ${ops.meetings.total}`,
     `- Execucoes internas hoje: ${ops.budget.totalRuns}/${ops.budget.limits.totalDaily}`,
+    `- Modo de custo: ${ops.costMode.mode}`,
+    `- Risco operacional: ${ops.risk.level} (${ops.risk.flags.join("; ") || "sem alertas"})`,
     "",
     "## Por area",
     ...ops.today.summary.map((item) => `- ${item.label}: ${item.value}`),
@@ -2535,6 +2855,11 @@ function buildEndOfDayReport() {
     ops.meetings.latest[0]
       ? `- ${ops.meetings.latest[0].goal} (${ops.meetings.latest[0].domain})`
       : "- Nenhuma reuniao registrada.",
+    "",
+    "## Ultimos traces",
+    ...(ops.traces.latest.length
+      ? ops.traces.latest.map((trace) => `- ${trace.id}: ${trace.kind}/${trace.status} ${trace.taskId || trace.meetingId || ""}`)
+      : ["- Nenhum trace registrado."]),
     "",
     "## Safety",
     "- Auto-run global permanece conforme .env.",
@@ -2578,6 +2903,7 @@ async function getOperationsStatus() {
   ]);
   return {
     mode: getOpsModeStatus(),
+    costMode: getCostModeStatus(),
     budget: getBudgetStatus(),
     engines: engineUsage,
     enginePolicy: getEnginePolicyStatus(),
@@ -2585,6 +2911,8 @@ async function getOperationsStatus() {
     meetings: summarizeMeetings(),
     cadence: getOpsCadenceStatus(),
     today: getTodayPanelStatus(),
+    risk: getRiskPanelStatus(engineUsage, hubStatus),
+    traces: summarizeTraces(12),
     jrcHub: hubStatus,
     safety: {
       externalActionsLocked: true,
@@ -2794,6 +3122,10 @@ function createOperationalTask(input = {}) {
     archived: false,
     priority: normalizePriority(input.priority),
     domain: typeof input.domain === "string" && input.domain.trim() ? input.domain.trim() : "geral",
+    traceId: typeof input.traceId === "string" ? input.traceId : null,
+    riskLevel: typeof input.riskLevel === "string" ? input.riskLevel : null,
+    handoff: input.handoff && typeof input.handoff === "object" ? input.handoff : null,
+    qualityScore: input.qualityScore && typeof input.qualityScore === "object" ? input.qualityScore : null,
     approval: {
       required: needsHumanApproval,
       status: normalizeApprovalStatus(input.approvalStatus, needsHumanApproval),
@@ -2834,6 +3166,10 @@ function updateOperationalTask(id, patch = {}) {
   if (typeof patch.domain === "string" && patch.domain.trim()) updated.domain = patch.domain.trim();
   if (typeof patch.source === "string") updated.source = normalizeTaskSource(patch.source);
   if (typeof patch.archived === "boolean") updated.archived = patch.archived;
+  if (typeof patch.traceId === "string" || patch.traceId === null) updated.traceId = patch.traceId;
+  if (typeof patch.riskLevel === "string" || patch.riskLevel === null) updated.riskLevel = patch.riskLevel;
+  if (patch.handoff && typeof patch.handoff === "object") updated.handoff = patch.handoff;
+  if (patch.qualityScore && typeof patch.qualityScore === "object") updated.qualityScore = patch.qualityScore;
   if (typeof patch.needsHumanApproval === "boolean") {
     updated.approval.required = patch.needsHumanApproval;
     updated.approval.status = normalizeApprovalStatus(patch.approvalStatus, patch.needsHumanApproval);
@@ -2843,6 +3179,16 @@ function updateOperationalTask(id, patch = {}) {
     if (updated.approval.status === "approved" || updated.approval.status === "rejected") {
       updated.approval.resolvedAt = nowIso();
       updated.approval.resolvedBy = "human";
+      recordTrace({
+        kind: "approval.resolve",
+        status: updated.approval.status,
+        taskId: updated.id,
+        agentId: updated.assignedAgentId,
+        domain: updated.domain,
+        riskLevel: updated.riskLevel || inferRiskLevel(updated),
+        handoff: updated.handoff || buildHandoffContract(updated),
+        message: `Aprovacao humana marcada como ${updated.approval.status}.`,
+      });
     }
   }
   if (typeof patch.approvalReason === "string") updated.approval.reason = patch.approvalReason.trim();

@@ -384,13 +384,20 @@ export const useUsageAnalytics = ({
   const [serverTotals, setServerTotals] = useState<UsageTotals | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const agentsRef = useRef(agents);
+  const clientRef = useRef(client);
+  const statusRef = useRef(status);
 
   useEffect(() => {
     agentsRef.current = agents;
   }, [agents]);
 
+  useEffect(() => {
+    clientRef.current = client;
+    statusRef.current = status;
+  }, [client, status]);
+
   const refresh = useCallback(async () => {
-    if (status !== "connected") {
+    if (statusRef.current !== "connected") {
       setSessions([]);
       setCostDaily([]);
       setServerTotals(null);
@@ -400,13 +407,13 @@ export const useUsageAnalytics = ({
     setError(null);
     try {
       const [usageResult, costResult] = await Promise.all([
-        client.call<UsageSessionsResult>("sessions.usage", {
+        clientRef.current.call<UsageSessionsResult>("sessions.usage", {
           startDate,
           endDate,
           limit: 1000,
           includeContextWeight: true,
         }),
-        client.call<UsageCostResult>("usage.cost", {
+        clientRef.current.call<UsageCostResult>("usage.cost", {
           startDate,
           endDate,
         }),
@@ -446,7 +453,7 @@ export const useUsageAnalytics = ({
     } finally {
       setLoading(false);
     }
-  }, [client, endDate, startDate, status]);
+  }, [endDate, startDate]);
 
   useEffect(() => {
     void refresh();

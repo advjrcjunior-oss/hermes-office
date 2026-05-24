@@ -44,6 +44,7 @@ export const useOfficeSkillTriggers = ({
   agents: AgentState[];
 }) => {
   const requestIdRef = useRef(0);
+  const clientRef = useRef(client);
   const [enabledTriggersByAgentId, setEnabledTriggersByAgentId] = useState<
     Record<string, SkillTriggerDefinition[]>
   >({});
@@ -63,6 +64,10 @@ export const useOfficeSkillTriggers = ({
     packagedTriggers.length > 0;
 
   useEffect(() => {
+    clientRef.current = client;
+  }, [client]);
+
+  useEffect(() => {
     if (!shouldLoadTriggers) {
       return;
     }
@@ -79,8 +84,8 @@ export const useOfficeSkillTriggers = ({
         const results = await Promise.all(
           stableAgentIds.map(async (agentId) => {
             const [report, allowlist] = await Promise.all([
-              loadAgentSkillStatus(client, agentId),
-              readGatewayAgentSkillsAllowlist({ client, agentId }),
+              loadAgentSkillStatus(clientRef.current, agentId),
+              readGatewayAgentSkillsAllowlist({ client: clientRef.current, agentId }),
             ]);
             const enabledTriggers = report.skills
               .filter((skill) => deriveSkillReadinessState(skill) === "ready")
@@ -113,7 +118,7 @@ export const useOfficeSkillTriggers = ({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [client, packagedTriggers, shouldLoadTriggers, stableAgentIds]);
+  }, [packagedTriggers, shouldLoadTriggers, stableAgentIds]);
 
   const visibleEnabledTriggersByAgentId = useMemo(
     () => (shouldLoadTriggers ? enabledTriggersByAgentId : {}),
