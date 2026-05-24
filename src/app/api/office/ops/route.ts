@@ -14,6 +14,8 @@ const MEETINGS_FILE = path.join(HOME, ".hermes", "jrc-office-meetings.json");
 const TRACES_FILE = path.join(HOME, ".hermes", "jrc-office-traces.json");
 const MEDIA_JOBS_FILE = path.join(HOME, ".hermes", "jrc-media-jobs.json");
 const MEDIA_BUDGET_FILE = path.join(HOME, ".hermes", "jrc-media-budget.json");
+const SECOND_BRAIN_FILE = path.join(HOME, ".hermes", "jrc-second-brain-inbox.json");
+const OBSIDIAN_VAULT_DIR = process.env.OBSIDIAN_VAULT_DIR || path.join(HOME, "Documents", "Obsidian Vault");
 
 const HERMES_API_URL = (process.env.HERMES_API_URL || "http://127.0.0.1:18642").replace(/\/$/, "");
 const JRC_TASK_RUN_DAILY_LIMIT = Number.parseInt(process.env.JRC_TASK_RUN_DAILY_LIMIT || "6", 10);
@@ -656,6 +658,234 @@ const createVirtualOfficeSeedTasks = () => {
   return created;
 };
 
+const stableKey = (value: string) => {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(16);
+};
+
+const inferSecondBrainSourceType = (value: string) => {
+  const text = value.toLowerCase();
+  if (/tiktok|vt\.tiktok/.test(text)) return "tiktok";
+  if (/github\.com/.test(text)) return "repo";
+  if (/docs|documentation|\/doc/.test(text)) return "doc";
+  if (/http/.test(text)) return "article";
+  return "idea";
+};
+
+const analyzeSecondBrainSource = (input: { title: string; url?: string; summary: string }) => {
+  const sourceText = `${input.title} ${input.url ?? ""} ${input.summary}`.toLowerCase();
+  const tags: string[] = [];
+  const actions: string[] = [];
+  let verdict = "watch";
+  let score = 60;
+  let domain = "gestao";
+  if (/antigravity|agent os|openclaw|hermes|multi.agent|multi-agent|gemini/.test(sourceText)) {
+    tags.push("agent-os", "orquestracao", "devops");
+    actions.push("Comparar com Hermes Office antes de trocar stack.");
+    actions.push("Criar tarefa de integracao apenas se houver ganho claro sobre fila atual.");
+    verdict = "adopt_pattern";
+    score += 18;
+    domain = "devops";
+  }
+  if (/obsidian|second brain|claude code|memoria|memory/.test(sourceText)) {
+    tags.push("second-brain", "obsidian", "memoria");
+    actions.push("Salvar insight no vault e conectar ao fluxo de sessao dos agentes.");
+    actions.push("Criar tarefa para transformar conhecimento em playbook ou discovery.");
+    verdict = "adopt_now";
+    score += 20;
+    domain = "gestao";
+  }
+  if (/marketing|tiktok|reels|creative|criativo|ads/.test(sourceText)) {
+    tags.push("marketing", "midia");
+    actions.push("Transformar em job de midia ou pauta editorial somente apos revisao.");
+    score += 8;
+    domain = domain === "gestao" ? "marketing" : domain;
+  }
+  if (tags.length === 0) {
+    tags.push("triagem");
+    actions.push("Analisar manualmente antes de virar implementacao.");
+  }
+  return {
+    verdict,
+    score: Math.max(0, Math.min(100, score)),
+    domain,
+    tags: [...new Set(tags)],
+    impact: verdict === "adopt_now"
+      ? "Aplicar como camada operacional do Hermes/JRC: memoria persistente, fila e tarefas."
+      : verdict === "adopt_pattern"
+        ? "Usar como padrao de produto, sem substituir stack atual sem prova."
+        : "Acompanhar; ainda nao justifica mudanca operacional.",
+    recommendedActions: actions,
+    risks: [
+      "Videos curtos podem exagerar capacidade real.",
+      "Nao conectar ferramenta nova a dados juridicos sem teste, sandbox e aprovacao.",
+      "Nao aumentar consumo de planos sem budget.",
+    ],
+  };
+};
+
+const loadSecondBrain = () => {
+  const parsed = readJsonFile(SECOND_BRAIN_FILE);
+  const insights = Array.isArray(parsed?.insights)
+    ? parsed.insights.filter((insight): insight is JsonRecord =>
+        Boolean(insight && typeof insight === "object" && !Array.isArray(insight) && typeof (insight as JsonRecord).id === "string" && !(insight as JsonRecord).archived),
+      )
+    : [];
+  const byStatus: Record<string, number> = {};
+  const byVerdict: Record<string, number> = {};
+  for (const insight of insights) {
+    const status = typeof insight.status === "string" ? insight.status : "triaged";
+    const verdict = typeof insight.verdict === "string" ? insight.verdict : "watch";
+    byStatus[status] = (byStatus[status] || 0) + 1;
+    byVerdict[verdict] = (byVerdict[verdict] || 0) + 1;
+  }
+  return {
+    total: insights.length,
+    byStatus,
+    byVerdict,
+    latest: insights
+      .sort((left, right) => Number(right.updatedAtMs || 0) - Number(left.updatedAtMs || 0))
+      .slice(0, 8),
+  };
+};
+
+const writeSecondBrainNote = (insight: JsonRecord) => {
+  const safeTitle = String(insight.title || insight.id)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9 -]/g, "")
+    .trim()
+    .slice(0, 80) || String(insight.id);
+  const filePath = path.join(OBSIDIAN_VAULT_DIR, "02 - Escritorio", "Dicas IA", `${todayKey()} ${safeTitle}.md`);
+  const actions = Array.isArray(insight.recommendedActions) ? insight.recommendedActions.map(String) : [];
+  const risks = Array.isArray(insight.risks) ? insight.risks.map(String) : [];
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, [
+    `# ${String(insight.title || insight.id)}`,
+    "",
+    `Fonte: ${String(insight.url || insight.sourceType || "")}`,
+    `Tipo: ${String(insight.sourceType || "")}`,
+    `Veredito: ${String(insight.verdict || "")}`,
+    `Score: ${String(insight.score || "")}`,
+    "",
+    "## Resumo",
+    String(insight.summary || "Insight capturado pelo Hermes Office."),
+    "",
+    "## Impacto JRC",
+    String(insight.impact || ""),
+    "",
+    "## Acoes recomendadas",
+    ...actions.map((action) => `- ${action}`),
+    "",
+    "## Riscos",
+    ...risks.map((risk) => `- ${risk}`),
+    "",
+  ].join("\n"), "utf8");
+  return filePath;
+};
+
+const createSecondBrainTasks = (insight: JsonRecord) => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+  const baseSource = `second-brain:${String(insight.id)}`;
+  const now = new Date().toISOString();
+  const specs = [
+    ["research", "jrc-pesquisador", "gestao", false, "Validar claims, fonte primaria, riscos e redundancia com stack JRC."],
+    ["implement", insight.domain === "marketing" ? "jrc-marketing" : "jrc-devops", String(insight.domain || "gestao"), insight.verdict !== "adopt_now", "Converter insight em proposta operacional, PRD pequeno ou tarefa tecnica interna."],
+    ["skeptic", "jrc-revisor", "gestao", true, "Procurar exagero, risco juridico, custo, lock-in e conflito com o que ja existe."],
+  ] as const;
+  const created = [];
+  for (const [suffix, agentId, domain, approval, description] of specs) {
+    const sourceEventId = `${baseSource}:${suffix}`;
+    if (hasTaskForSource(tasks, sourceEventId)) continue;
+    const task = {
+      id: `jrc-task-${Math.random().toString(16).slice(2, 14)}`,
+      title: `Second Brain - ${suffix}: ${String(insight.title || insight.id)}`,
+      description: [
+        description,
+        `Fonte: ${String(insight.url || insight.sourceType || "")}`,
+        `Resumo: ${String(insight.summary || "")}`,
+        `Impacto: ${String(insight.impact || "")}`,
+      ].join("\n\n"),
+      status: "todo",
+      source: "playbook",
+      sourceEventId,
+      assignedAgentId: agentId,
+      createdAt: now,
+      updatedAt: now,
+      updatedAtMs: Date.now(),
+      lastActivityAt: now,
+      priority: Number(insight.score || 0) >= 80 ? "high" : "normal",
+      domain,
+      notes: ["Criado pela fila Second Brain. Nenhum ato externo foi executado."],
+      archived: false,
+      approval: {
+        required: approval,
+        status: approval ? "pending" : "not_required",
+        reason: approval ? "Insight externo precisa revisao humana/cetica antes de virar execucao final." : "",
+        resolvedAt: null,
+        resolvedBy: null,
+      },
+    };
+    tasks.unshift(task);
+    created.push(task);
+  }
+  writeJsonFile(TASKS_FILE, { version: 1, tasks });
+  return created;
+};
+
+const ingestSecondBrain = (input: JsonRecord) => {
+  const url = typeof input.url === "string" ? input.url.trim() : "";
+  const title = typeof input.title === "string" && input.title.trim() ? input.title.trim() : (url ? `Insight ${url}` : "Insight manual JRC");
+  const summary = typeof input.summary === "string" && input.summary.trim() ? input.summary.trim() : "Insight capturado para triagem operacional do JRC.";
+  const sourceType = typeof input.sourceType === "string" ? input.sourceType : inferSecondBrainSourceType(`${url} ${summary}`);
+  const sourceKey = stableKey(`${sourceType}:${url || title}:${summary}`);
+  const parsed = readJsonFile(SECOND_BRAIN_FILE);
+  const insights = Array.isArray(parsed?.insights) ? parsed.insights : [];
+  const existing = insights.find((insight) => insight && typeof insight === "object" && (insight as JsonRecord).sourceKey === sourceKey && !(insight as JsonRecord).archived);
+  if (existing && typeof existing === "object") return { insight: existing, createdTasks: [], duplicate: true, summary: loadSecondBrain() };
+  const analysis = analyzeSecondBrainSource({ title, url, summary });
+  const now = new Date().toISOString();
+  const insight = {
+    id: `second-brain-${todayKey()}-${Math.random().toString(16).slice(2, 14)}`,
+    sourceKey,
+    sourceType,
+    url: url || null,
+    title,
+    summary,
+    status: "triaged",
+    createdAt: now,
+    updatedAt: now,
+    updatedAtMs: Date.now(),
+    archived: false,
+    ...analysis,
+    obsidianPath: null as string | null,
+  };
+  if (input.writeNote !== false) {
+    insight.obsidianPath = writeSecondBrainNote(insight);
+  }
+  writeJsonFile(SECOND_BRAIN_FILE, { version: 1, insights: [insight, ...insights].slice(0, 300) });
+  const createdTasks = input.createTasks === false ? [] : createSecondBrainTasks(insight);
+  return { insight, createdTasks, duplicate: false, summary: loadSecondBrain() };
+};
+
+const seedSecondBrainRecent = () => [
+  ingestSecondBrain({
+    url: "https://www.tiktok.com/@future.with.ai98/video/7642315371072081159",
+    title: "Google Antigravity 2.0 + Agent OS",
+    sourceType: "tiktok",
+    summary: "Video mostra Google Antigravity 2.0 conectado a Agent OS com Gemini, Hermes, OpenClaw e Claude para orquestrar multiplos agentes e automatizar workflows.",
+  }),
+  ingestSecondBrain({
+    url: "https://www.tiktok.com/@itstaayjus/video/7642411871307451678",
+    title: "Obsidian + Claude Code Second Brain",
+    sourceType: "tiktok",
+    summary: "Video reforca Obsidian como second brain para Claude/Claude Code, usando memoria persistente para agentes trabalharem sem recomecar do zero.",
+  }),
+];
+
 const buildMediaOpsStatus = () => {
   const providers = [
     {
@@ -771,6 +1001,7 @@ const buildOpsStatus = async () => {
     traces: loadTraces(),
     media: buildMediaOpsStatus(),
     virtualOffice: buildVirtualOfficeStatus(),
+    secondBrain: loadSecondBrain(),
     jrcHub: buildJrcHubStatus(),
     safety: {
       externalActionsLocked: true,
@@ -804,8 +1035,20 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as JsonRecord & { action?: unknown; mode?: unknown };
     const action = typeof body.action === "string" ? body.action : "mode.set";
-    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed") {
-      return NextResponse.json({ error: "Fallback HTTP only supports mode.set, costMode.set, media.jobs.create and virtualOffice.seed. Connect gateway for execution actions." }, { status: 400 });
+    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed" && action !== "secondBrain.ingest" && action !== "secondBrain.seedRecent") {
+      return NextResponse.json({ error: "Fallback HTTP only supports safe local Ops actions. Connect gateway for execution actions." }, { status: 400 });
+    }
+    if (action === "secondBrain.ingest") {
+      ingestSecondBrain(body);
+      return NextResponse.json(await buildOpsStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+    if (action === "secondBrain.seedRecent") {
+      seedSecondBrainRecent();
+      return NextResponse.json(await buildOpsStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     if (action === "virtualOffice.seed") {
       createVirtualOfficeSeedTasks();

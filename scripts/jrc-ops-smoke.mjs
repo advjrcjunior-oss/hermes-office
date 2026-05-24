@@ -27,6 +27,8 @@ if (typeof payload?.media?.jobs?.total !== "number") failures.push("missing medi
 if (!payload?.media?.budget?.limits) failures.push("missing media budget limits");
 if (typeof payload?.virtualOffice?.coveragePct !== "number") failures.push("missing virtual office coverage");
 if (!Array.isArray(payload?.virtualOffice?.roles)) failures.push("missing virtual office roles");
+if (typeof payload?.secondBrain?.total !== "number") failures.push("missing second brain total");
+if (!Array.isArray(payload?.secondBrain?.latest)) failures.push("missing second brain latest");
 if (!payload?.safety?.externalActionsLocked) failures.push("safety lock is not enabled");
 
 if (failures.length > 0) {
@@ -52,6 +54,7 @@ console.log(
       mediaPrepRemaining: payload.media.budget.remainingTotal,
       virtualOfficeCoverage: payload.virtualOffice.coveragePct,
       virtualOfficeRoles: payload.virtualOffice.totalRoles,
+      secondBrainInsights: payload.secondBrain.total,
       todayReady: payload.today.workflow?.ready ?? 0,
       autoRunEnabled: payload.budget.limits.autoRunEnabled,
       externalActionsLocked: payload.safety.externalActionsLocked,

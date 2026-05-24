@@ -223,6 +223,25 @@ type OpsStatus = {
     }>;
     hardLocks?: string[];
   };
+  secondBrain?: {
+    total?: number;
+    byStatus?: Record<string, number>;
+    byVerdict?: Record<string, number>;
+    latest?: Array<{
+      id?: string;
+      title?: string;
+      url?: string | null;
+      sourceType?: string;
+      summary?: string;
+      verdict?: string;
+      score?: number;
+      impact?: string;
+      domain?: string;
+      tags?: string[];
+      recommendedActions?: string[];
+      obsidianPath?: string | null;
+    }>;
+  };
   jrcHub?: {
     ok?: boolean;
     readOnlyKeyConfigured?: boolean;
@@ -299,6 +318,7 @@ export function OperationsPanel({
   const [savingCostMode, setSavingCostMode] = useState<CostMode | null>(null);
   const [meetingGoal, setMeetingGoal] = useState("Priorizar o dia da JRC e delegar proximas tarefas com safety locks.");
   const [mediaPrompt, setMediaPrompt] = useState("Criativo educativo BPC/LOAS para Instagram, sem publicar, com linguagem clara e etica.");
+  const [secondBrainInput, setSecondBrainInput] = useState("https://vt.tiktok.com/ZSxuf4Mev/\nhttps://vt.tiktok.com/ZSxufsDwH/");
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -579,6 +599,61 @@ export function OperationsPanel({
     });
   }, [client, runGatewayAction, status]);
 
+  const handleIngestSecondBrain = useCallback(() => {
+    const text = secondBrainInput.trim();
+    void runGatewayAction("secondBrainIngest", async () => {
+      if (!text) throw new Error("Cole um link ou ideia para o Second Brain.");
+      const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+      const sourceSummary = lines.length > 1
+        ? `Links/ideias capturados no painel Ops:\n- ${lines.join("\n- ")}`
+        : "Insight capturado pelo painel Ops para triagem operacional.";
+      if (status === "connected") {
+        for (const line of lines) {
+          await client.call("secondBrain.ingest", {
+            url: /^https?:\/\//i.test(line) ? line : undefined,
+            title: /^https?:\/\//i.test(line) ? `Insight ${line}` : line,
+            summary: sourceSummary,
+            sourceType: /tiktok|vt\.tiktok/i.test(line) ? "tiktok" : undefined,
+          });
+        }
+        return null;
+      }
+      for (const line of lines) {
+        const response = await fetch("/api/office/ops", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "secondBrain.ingest",
+            url: /^https?:\/\//i.test(line) ? line : undefined,
+            title: /^https?:\/\//i.test(line) ? `Insight ${line}` : line,
+            summary: sourceSummary,
+            sourceType: /tiktok|vt\.tiktok/i.test(line) ? "tiktok" : undefined,
+          }),
+        });
+        const payload = (await response.json()) as OpsStatus & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Failed to ingest insight.");
+        setSnapshot(payload);
+      }
+      return null;
+    });
+  }, [client, runGatewayAction, secondBrainInput, status]);
+
+  const handleSeedSecondBrain = useCallback(() => {
+    void runGatewayAction("secondBrainSeed", async () => {
+      if (status === "connected") return client.call("secondBrain.seedRecent", {});
+      return fetch("/api/office/ops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "secondBrain.seedRecent" }),
+      }).then(async (response) => {
+        const payload = (await response.json()) as OpsStatus & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Failed to seed second brain.");
+        setSnapshot(payload);
+        return payload;
+      });
+    });
+  }, [client, runGatewayAction, status]);
+
   const currentMode = snapshot?.mode?.mode ?? "assisted";
   const currentCostMode = snapshot?.costMode?.mode ?? "balanced";
   const engineEntries = useMemo(
@@ -824,6 +899,82 @@ export function OperationsPanel({
           </div>
           <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
             A equipe virtual assume trabalho interno; atos externos continuam travados por aprovacao humana.
+          </div>
+        </section>
+
+        <section className="mt-3 rounded border border-violet-400/15 bg-violet-950/10 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-violet-100/75">
+              Second Brain
+            </div>
+            <div className="font-mono text-[10px] text-violet-100/50">
+              {formatNumber(snapshot?.secondBrain?.total)} insights
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Adotar</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.secondBrain?.byVerdict?.adopt_now)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Padrao</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.secondBrain?.byVerdict?.adopt_pattern)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Triagem</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.secondBrain?.byStatus?.triaged)}</div>
+            </div>
+          </div>
+          <textarea
+            value={secondBrainInput}
+            onChange={(event) => setSecondBrainInput(event.target.value)}
+            rows={3}
+            className="mt-3 w-full resize-none rounded border border-white/10 bg-black/30 px-2 py-2 text-xs text-white outline-none transition placeholder:text-white/25 focus:border-violet-300/45"
+            placeholder="Cole links, TikToks, repos ou ideias para absorver"
+          />
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handleIngestSecondBrain}
+              disabled={actionBusy !== null}
+              className="rounded border border-violet-400/25 bg-violet-500/10 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-violet-50 transition hover:border-violet-300/45 disabled:opacity-45"
+            >
+              {actionBusy === "secondBrainIngest" ? "Absorvendo" : "Absorver links"}
+            </button>
+            <button
+              type="button"
+              onClick={handleSeedSecondBrain}
+              disabled={actionBusy !== null}
+              className="rounded border border-white/10 bg-black/20 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-white/65 transition hover:border-violet-400/30 hover:text-white disabled:opacity-45"
+            >
+              {actionBusy === "secondBrainSeed" ? "Criando" : "Seed TikToks"}
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {(snapshot?.secondBrain?.latest ?? []).slice(0, 5).map((insight) => (
+              <div key={insight.id ?? insight.title} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+                <div className="line-clamp-2 text-xs text-white/85">{insight.title}</div>
+                <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
+                  {insight.sourceType} / {insight.verdict} / score {formatNumber(insight.score)}
+                </div>
+                {insight.impact ? (
+                  <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-white/40">{insight.impact}</div>
+                ) : null}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(insight.tags ?? []).slice(0, 4).map((tag) => (
+                    <span key={tag} className="rounded border border-violet-300/15 bg-black/20 px-2 py-1 text-[10px] text-violet-100/65">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {(snapshot?.secondBrain?.latest ?? []).length === 0 ? (
+              <div className="text-[11px] text-white/35">Nenhum insight absorvido ainda.</div>
+            ) : null}
+          </div>
+          <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
+            Links viram notas, tarefas e revisao cetica; modinha nao entra em producao sem prova.
           </div>
         </section>
 
