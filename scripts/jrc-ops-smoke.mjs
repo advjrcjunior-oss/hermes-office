@@ -23,6 +23,8 @@ if (!payload?.risk?.level) failures.push("missing risk panel");
 if (!Array.isArray(payload?.traces?.latest)) failures.push("missing traces");
 if (!Array.isArray(payload?.media?.providers)) failures.push("missing media ops providers");
 if (typeof payload?.media?.configuredCount !== "number") failures.push("missing media configured count");
+if (typeof payload?.media?.jobs?.total !== "number") failures.push("missing media jobs total");
+if (!payload?.media?.budget?.limits) failures.push("missing media budget limits");
 if (!payload?.safety?.externalActionsLocked) failures.push("safety lock is not enabled");
 
 if (failures.length > 0) {
@@ -44,6 +46,8 @@ console.log(
       risk: payload.risk.level,
       traces: payload.traces.total ?? 0,
       mediaConfigured: `${payload.media.configuredCount}/${payload.media.total}`,
+      mediaJobs: payload.media.jobs.total,
+      mediaPrepRemaining: payload.media.budget.remainingTotal,
       todayReady: payload.today.workflow?.ready ?? 0,
       autoRunEnabled: payload.budget.limits.autoRunEnabled,
       externalActionsLocked: payload.safety.externalActionsLocked,

@@ -84,6 +84,7 @@ type OpsStatus = {
     engineBlocked?: number;
     hubFailures?: number;
     flags?: string[];
+    mediaApprovals?: number;
   };
   traces?: {
     total?: number;
@@ -170,6 +171,34 @@ type OpsStatus = {
       publishRequiresApproval?: boolean;
       highCostVideoRequiresApproval?: boolean;
     };
+    jobs?: {
+      total?: number;
+      pendingApproval?: number;
+      byStatus?: Record<string, number>;
+      latest?: Array<{
+        id: string;
+        title?: string;
+        kind?: string;
+        providerId?: string;
+        status?: string;
+        priority?: string;
+        prompt?: string;
+        estimate?: { costUsdMin?: number; costUsdMax?: number; tier?: string; credits?: string };
+        approval?: { required?: boolean; status?: string; reason?: string };
+      }>;
+    };
+    budget?: {
+      preparedRuns?: number;
+      remainingTotal?: number;
+      byProvider?: Record<string, number>;
+      blocked?: Array<{ reason?: string; title?: string; providerId?: string }>;
+      limits?: {
+        preparedDaily?: number;
+        externalSpendRequiresApproval?: boolean;
+        publishRequiresApproval?: boolean;
+        actualProviderCallsEnabled?: boolean;
+      };
+    };
     recommendedDefault?: string;
     missing?: string[];
   };
@@ -248,6 +277,7 @@ export function OperationsPanel({
   const [savingMode, setSavingMode] = useState<OpsMode | null>(null);
   const [savingCostMode, setSavingCostMode] = useState<CostMode | null>(null);
   const [meetingGoal, setMeetingGoal] = useState("Priorizar o dia da JRC e delegar proximas tarefas com safety locks.");
+  const [mediaPrompt, setMediaPrompt] = useState("Criativo educativo BPC/LOAS para Instagram, sem publicar, com linguagem clara e etica.");
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -450,6 +480,64 @@ export function OperationsPanel({
           note: "Revisao solicitada visualmente no painel Ops.",
         }),
       );
+    },
+    [client, runGatewayAction],
+  );
+
+  const handleCreateMediaJob = useCallback(
+    (kind: string, providerId: string) => {
+      const prompt = mediaPrompt.trim();
+      void runGatewayAction(`mediaCreate:${kind}`, async () => {
+        if (!prompt) throw new Error("Informe o briefing do criativo.");
+        if (status === "connected") {
+          return client.call("media.jobs.create", {
+            kind,
+            providerId,
+            title: `Midia JRC - ${kind}`,
+            prompt,
+            priority: kind === "video" ? "high" : "normal",
+          });
+        }
+        return fetch("/api/office/ops", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "media.jobs.create",
+            kind,
+            providerId,
+            title: `Midia JRC - ${kind}`,
+            prompt,
+            priority: kind === "video" ? "high" : "normal",
+          }),
+        }).then(async (response) => {
+          const payload = (await response.json()) as OpsStatus & { error?: string };
+          if (!response.ok) throw new Error(payload.error || "Failed to create media job.");
+          setSnapshot(payload);
+          return payload;
+        });
+      });
+    },
+    [client, mediaPrompt, runGatewayAction, status],
+  );
+
+  const handleMediaApproval = useCallback(
+    (jobId: string, approved: boolean) => {
+      void runGatewayAction(approved ? "mediaApprove" : "mediaReject", async () =>
+        client.call("media.jobs.approval.resolve", {
+          id: jobId,
+          approved,
+          note: approved
+            ? "Aprovado visualmente no painel Media Ops para preparacao; publicacao continua travada."
+            : "Rejeitado visualmente no painel Media Ops.",
+        }),
+      );
+    },
+    [client, runGatewayAction],
+  );
+
+  const handleRunMediaDryRun = useCallback(
+    (jobId: string) => {
+      void runGatewayAction("mediaDryRun", async () => client.call("media.jobs.run", { id: jobId, dryRun: true }));
     },
     [client, runGatewayAction],
   );
@@ -980,6 +1068,108 @@ export function OperationsPanel({
           </div>
           <div className="mt-2 text-[11px] leading-4 text-white/45">
             {snapshot?.media?.recommendedDefault ?? "Pipeline de midia ainda nao carregado."}
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Jobs</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.media?.jobs?.total)}</div>
+            </div>
+            <div className="rounded border border-amber-300/15 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-amber-100/45">OK?</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.media?.jobs?.pendingApproval)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Prep</div>
+              <div className="mt-1 text-lg font-semibold">
+                {formatNumber(snapshot?.media?.budget?.preparedRuns)}
+                <span className="text-xs font-normal text-white/35">
+                  {" "}/ {formatNumber(snapshot?.media?.budget?.limits?.preparedDaily)}
+                </span>
+              </div>
+            </div>
+          </div>
+          <textarea
+            value={mediaPrompt}
+            onChange={(event) => setMediaPrompt(event.target.value)}
+            rows={3}
+            className="mt-3 w-full resize-none rounded border border-white/10 bg-black/30 px-2 py-2 text-xs text-white outline-none transition placeholder:text-white/25 focus:border-fuchsia-300/45"
+            placeholder="Briefing do criativo"
+          />
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleCreateMediaJob("ad_creative", "ideogram")}
+              disabled={actionBusy !== null}
+              className="rounded border border-fuchsia-400/25 bg-fuchsia-500/10 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-fuchsia-50 transition hover:border-fuchsia-300/45 disabled:opacity-45"
+            >
+              {actionBusy === "mediaCreate:ad_creative" ? "Criando" : "Criar imagem"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCreateMediaJob("video", "creatomate")}
+              disabled={actionBusy !== null}
+              className="rounded border border-fuchsia-400/25 bg-fuchsia-500/10 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-fuchsia-50 transition hover:border-fuchsia-300/45 disabled:opacity-45"
+            >
+              {actionBusy === "mediaCreate:video" ? "Criando" : "Criar video"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCreateMediaJob("voice", "elevenlabs")}
+              disabled={actionBusy !== null}
+              className="rounded border border-white/10 bg-black/20 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-white/65 transition hover:border-fuchsia-400/30 hover:text-white disabled:opacity-45"
+            >
+              {actionBusy === "mediaCreate:voice" ? "Criando" : "Criar voz"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCreateMediaJob("edit", "creatomate")}
+              disabled={actionBusy !== null}
+              className="rounded border border-white/10 bg-black/20 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-white/65 transition hover:border-fuchsia-400/30 hover:text-white disabled:opacity-45"
+            >
+              {actionBusy === "mediaCreate:edit" ? "Criando" : "Criar edicao"}
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {(snapshot?.media?.jobs?.latest ?? []).slice(0, 5).map((job) => (
+              <div key={job.id} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+                <div className="line-clamp-2 text-xs text-white/85">{job.title}</div>
+                <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
+                  {job.kind} / {job.providerId} / {job.status}
+                </div>
+                <div className="mt-1 text-[11px] leading-4 text-white/40">
+                  Estimativa: ${job.estimate?.costUsdMin ?? 0}-${job.estimate?.costUsdMax ?? 0} / {job.approval?.status ?? "n/a"}
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleMediaApproval(job.id, true)}
+                    disabled={actionBusy !== null || job.approval?.status === "approved"}
+                    className="rounded border border-emerald-400/20 bg-emerald-500/10 px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-emerald-50 disabled:opacity-45"
+                  >
+                    Aprovar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRunMediaDryRun(job.id)}
+                    disabled={actionBusy !== null}
+                    className="rounded border border-fuchsia-400/20 bg-fuchsia-500/10 px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-fuchsia-50 disabled:opacity-45"
+                  >
+                    Dry-run
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleMediaApproval(job.id, false)}
+                    disabled={actionBusy !== null || job.approval?.status === "rejected"}
+                    className="rounded border border-red-400/20 bg-red-500/10 px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-red-50 disabled:opacity-45"
+                  >
+                    Rejeitar
+                  </button>
+                </div>
+              </div>
+            ))}
+            {(snapshot?.media?.jobs?.latest ?? []).length === 0 ? (
+              <div className="text-[11px] text-white/35">Nenhum job de midia criado ainda.</div>
+            ) : null}
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
             {(snapshot?.media?.providers ?? []).map((provider) => (

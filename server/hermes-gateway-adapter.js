@@ -587,12 +587,16 @@ const OPS_MODE_FILE = path.join(HOME, ".hermes", "jrc-office-ops-mode.json");
 const COST_MODE_FILE = path.join(HOME, ".hermes", "jrc-office-cost-mode.json");
 const MEETINGS_FILE = path.join(HOME, ".hermes", "jrc-office-meetings.json");
 const TRACES_FILE = path.join(HOME, ".hermes", "jrc-office-traces.json");
+const MEDIA_JOBS_FILE = path.join(HOME, ".hermes", "jrc-media-jobs.json");
+const MEDIA_BUDGET_FILE = path.join(HOME, ".hermes", "jrc-media-budget.json");
 let persistDebounceTimer = null;
 let tasksPersistDebounceTimer = null;
 let budgetPersistDebounceTimer = null;
 let opsModePersistDebounceTimer = null;
 let costModePersistDebounceTimer = null;
 let tracesPersistDebounceTimer = null;
+let mediaJobsPersistDebounceTimer = null;
+let mediaBudgetPersistDebounceTimer = null;
 let taskRunInFlight = false;
 
 function loadHistoryFromDisk() {
@@ -1919,6 +1923,69 @@ async function handleMethod(method, params, id, sendEvent) {
         return resErr(id, "INVALID_REQUEST", sanitizeErrorMessage(error));
       }
 
+    case "media.jobs.list":
+      return resOk(id, { jobs: mediaJobState.jobs.filter((job) => !job.archived), summary: summarizeMediaJobs() });
+
+    case "media.jobs.create":
+      try {
+        return resOk(id, { job: createMediaJob(p), summary: summarizeMediaJobs() });
+      } catch (error) {
+        return resErr(id, "INVALID_REQUEST", sanitizeErrorMessage(error));
+      }
+
+    case "media.jobs.update":
+      try {
+        const jobId = typeof p.id === "string" ? p.id.trim() : "";
+        if (!jobId) return resErr(id, "INVALID_REQUEST", "Media job id is required.");
+        return resOk(id, { job: updateMediaJob(jobId, p), summary: summarizeMediaJobs() });
+      } catch (error) {
+        return resErr(id, "NOT_FOUND", sanitizeErrorMessage(error));
+      }
+
+    case "media.jobs.approval.resolve":
+      try {
+        const jobId = typeof p.id === "string" ? p.id.trim() : "";
+        const decision = p.approved === true ? "approved" : p.approved === false ? "rejected" : p.approvalStatus;
+        if (!jobId) return resErr(id, "INVALID_REQUEST", "Media job id is required.");
+        const job = updateMediaJob(jobId, {
+          approvalStatus: decision,
+          note: typeof p.note === "string" ? p.note : "",
+        });
+        recordTrace({
+          kind: "media.approval.resolve",
+          status: job.approval?.status || "unknown",
+          agentId: "jrc-amy",
+          domain: job.domain,
+          riskLevel: "medium",
+          message: `${job.title}: ${job.approval?.status || "unknown"}`,
+        });
+        return resOk(id, { job, summary: summarizeMediaJobs() });
+      } catch (error) {
+        return resErr(id, "NOT_FOUND", sanitizeErrorMessage(error));
+      }
+
+    case "media.jobs.run":
+      try {
+        const jobId = typeof p.id === "string" ? p.id.trim() : "";
+        if (!jobId) return resErr(id, "INVALID_REQUEST", "Media job id is required.");
+        return resOk(id, runMediaJob(jobId, { dryRun: p.dryRun !== false }));
+      } catch (error) {
+        return resErr(id, "INVALID_REQUEST", sanitizeErrorMessage(error));
+      }
+
+    case "media.budget.status":
+      return resOk(id, getMediaBudgetStatus());
+
+    case "media.budget.reset":
+      mediaBudgetState = {
+        date: todayKey(),
+        preparedRuns: 0,
+        byProvider: {},
+        blocked: [],
+      };
+      saveMediaBudgetToDisk();
+      return resOk(id, getMediaBudgetStatus());
+
     case "jrcHub.status":
       try {
         const snapshot = await getJrcHubSnapshot();
@@ -2064,6 +2131,8 @@ function startAdapter() {
               "playbooks.list","playbooks.start",
               "budget.status","budget.reset",
               "ops.status","ops.mode.set","ops.costMode.set","ops.traces.list","ops.report.write",
+              "media.jobs.list","media.jobs.create","media.jobs.update","media.jobs.approval.resolve",
+              "media.jobs.run","media.budget.status","media.budget.reset",
               "jrcHub.status","jrcHub.syncTriggers",
               "cron.list","cron.add","cron.remove","cron.patch","cron.run"],
               events: ["chat","presence","heartbeat","cron","task"] },
@@ -2239,6 +2308,18 @@ let meetingState = {
 let traceState = {
   version: 1,
   traces: [],
+};
+
+let mediaJobState = {
+  version: 1,
+  jobs: [],
+};
+
+let mediaBudgetState = {
+  date: todayKey(),
+  preparedRuns: 0,
+  byProvider: {},
+  blocked: [],
 };
 
 function loadOpsModeFromDisk() {
@@ -2479,6 +2560,391 @@ function summarizeTraces(limit = 12) {
   };
 }
 
+const MEDIA_JOB_KINDS = new Set(["image", "video", "voice", "avatar", "edit", "carousel", "ad_creative"]);
+const MEDIA_JOB_STATUSES = new Set(["draft", "pending_approval", "approved", "blocked", "ready", "done", "rejected"]);
+const MEDIA_APPROVAL_STATUSES = new Set(["not_required", "pending", "approved", "rejected"]);
+const MEDIA_PROVIDER_IDS = new Set(["elevenlabs", "google-gemini", "openai", "fal", "replicate", "ideogram", "creatomate"]);
+const MEDIA_RUN_DAILY_LIMIT = Number.parseInt(process.env.JRC_MEDIA_PREP_DAILY_LIMIT || "12", 10);
+
+function getMediaProviders() {
+  return [
+    {
+      id: "elevenlabs",
+      label: "ElevenLabs",
+      kind: "voice",
+      env: "ELEVENLABS_API_KEY",
+      role: "voz natural e voice clone para videos HeyGen/Reels",
+      defaultUse: "roteiro -> voz PT-BR natural",
+      approval: "required_for_publish",
+    },
+    {
+      id: "google-gemini",
+      label: "Google/Gemini",
+      kind: "image",
+      env: "GOOGLE_API_KEY",
+      role: "nano-banana/Gemini image para criativos e imagens isoladas",
+      defaultUse: "imagem estatica e variacoes de campanha",
+      approval: "required_for_external_use",
+    },
+    {
+      id: "openai",
+      label: "OpenAI",
+      kind: "image",
+      env: "OPENAI_API_KEY",
+      role: "fallback de imagem/vision quando modelo local nao basta",
+      defaultUse: "criativo pontual e analise visual nao sensivel",
+      approval: "required_for_sensitive_docs",
+    },
+    {
+      id: "fal",
+      label: "Fal.ai",
+      kind: "image_video",
+      env: "FAL_API_KEY",
+      role: "Flux/Veo/Kling e geracao de B-roll",
+      defaultUse: "video curto, B-roll e imagem premium",
+      approval: "required_for_paid_generation",
+    },
+    {
+      id: "replicate",
+      label: "Replicate",
+      kind: "image_video",
+      env: "REPLICATE_API_KEY",
+      role: "fallback para modelos de imagem/video",
+      defaultUse: "experimentos controlados e fallback",
+      approval: "required_for_paid_generation",
+    },
+    {
+      id: "ideogram",
+      label: "Ideogram",
+      kind: "image",
+      env: "IDEOGRAM_API_KEY",
+      role: "arte com texto e criativos de campanha",
+      defaultUse: "posts com lettering/titulos",
+      approval: "required_for_external_use",
+    },
+    {
+      id: "creatomate",
+      label: "Creatomate",
+      kind: "video_edit",
+      env: "CREATOMATE_API_KEY",
+      role: "montagem programatica de videos, templates e render",
+      defaultUse: "juntar voz, avatar, legenda e B-roll",
+      approval: "required_for_publish",
+    },
+  ].map((provider) => ({
+    ...provider,
+    configured: Boolean(process.env[provider.env]?.trim()),
+  }));
+}
+
+function normalizeMediaKind(kind) {
+  const value = typeof kind === "string" ? kind.trim() : "";
+  return MEDIA_JOB_KINDS.has(value) ? value : "ad_creative";
+}
+
+function normalizeMediaProvider(providerId, kind) {
+  const value = typeof providerId === "string" ? providerId.trim() : "";
+  if (MEDIA_PROVIDER_IDS.has(value)) return value;
+  if (kind === "voice") return "elevenlabs";
+  if (kind === "video" || kind === "avatar") return "creatomate";
+  if (kind === "edit") return "creatomate";
+  if (kind === "carousel" || kind === "ad_creative") return "ideogram";
+  return "google-gemini";
+}
+
+function estimateMediaCost(kind, providerId) {
+  if (providerId === "fal" || providerId === "replicate" || kind === "video" || kind === "avatar") {
+    return { costUsdMin: 1, costUsdMax: 5, tier: "high", credits: "paid_video" };
+  }
+  if (providerId === "creatomate" || kind === "edit") {
+    return { costUsdMin: 0.05, costUsdMax: 0.5, tier: "medium", credits: "render" };
+  }
+  if (providerId === "elevenlabs" || kind === "voice") {
+    return { costUsdMin: 0.05, costUsdMax: 0.5, tier: "medium", credits: "voice_chars" };
+  }
+  return { costUsdMin: 0.02, costUsdMax: 0.2, tier: "low", credits: "image" };
+}
+
+function requiresMediaApproval(kind, providerId, estimate) {
+  return ["low", "medium", "high"].includes(estimate.tier)
+    || ["video", "avatar", "edit", "ad_creative", "carousel"].includes(kind)
+    || ["fal", "replicate", "creatomate", "ideogram"].includes(providerId);
+}
+
+function saveMediaJobsToDisk() {
+  clearTimeout(mediaJobsPersistDebounceTimer);
+  mediaJobsPersistDebounceTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(MEDIA_JOBS_FILE), { recursive: true });
+      fs.writeFileSync(MEDIA_JOBS_FILE, JSON.stringify(mediaJobState, null, 2), "utf8");
+    } catch (error) {
+      console.warn("[hermes-adapter] Failed to save media jobs:", sanitizeErrorMessage(error));
+    }
+  }, 100);
+}
+
+function loadMediaJobsFromDisk() {
+  try {
+    if (!fs.existsSync(MEDIA_JOBS_FILE)) return;
+    const parsed = JSON.parse(fs.readFileSync(MEDIA_JOBS_FILE, "utf8"));
+    const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
+    mediaJobState = {
+      version: 1,
+      jobs: jobs.filter((job) => job && typeof job === "object" && typeof job.id === "string").slice(0, 200),
+    };
+  } catch (error) {
+    console.warn("[hermes-adapter] Failed to load media jobs:", sanitizeErrorMessage(error));
+  }
+}
+
+function ensureMediaBudgetDate() {
+  const current = todayKey();
+  if (mediaBudgetState.date === current) return;
+  mediaBudgetState = {
+    date: current,
+    preparedRuns: 0,
+    byProvider: {},
+    blocked: [],
+  };
+  saveMediaBudgetToDisk();
+}
+
+function saveMediaBudgetToDisk() {
+  clearTimeout(mediaBudgetPersistDebounceTimer);
+  mediaBudgetPersistDebounceTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(MEDIA_BUDGET_FILE), { recursive: true });
+      fs.writeFileSync(MEDIA_BUDGET_FILE, JSON.stringify({ version: 1, ...mediaBudgetState }, null, 2), "utf8");
+    } catch (error) {
+      console.warn("[hermes-adapter] Failed to save media budget:", sanitizeErrorMessage(error));
+    }
+  }, 100);
+}
+
+function loadMediaBudgetFromDisk() {
+  try {
+    if (!fs.existsSync(MEDIA_BUDGET_FILE)) return;
+    const parsed = JSON.parse(fs.readFileSync(MEDIA_BUDGET_FILE, "utf8"));
+    if (parsed && typeof parsed === "object") mediaBudgetState = { ...mediaBudgetState, ...parsed };
+    ensureMediaBudgetDate();
+  } catch (error) {
+    console.warn("[hermes-adapter] Failed to load media budget:", sanitizeErrorMessage(error));
+  }
+}
+
+function getMediaBudgetStatus() {
+  ensureMediaBudgetDate();
+  return {
+    ...mediaBudgetState,
+    limits: {
+      preparedDaily: MEDIA_RUN_DAILY_LIMIT,
+      externalSpendRequiresApproval: true,
+      publishRequiresApproval: true,
+      actualProviderCallsEnabled: false,
+    },
+    remainingTotal: Math.max(0, MEDIA_RUN_DAILY_LIMIT - Number(mediaBudgetState.preparedRuns || 0)),
+  };
+}
+
+function recordMediaBudget(job, status, detail = "") {
+  ensureMediaBudgetDate();
+  if (status === "prepared") {
+    mediaBudgetState.preparedRuns = Number(mediaBudgetState.preparedRuns || 0) + 1;
+    mediaBudgetState.byProvider = {
+      ...(mediaBudgetState.byProvider || {}),
+      [job.providerId]: Number(mediaBudgetState.byProvider?.[job.providerId] || 0) + 1,
+    };
+  } else if (status === "blocked") {
+    mediaBudgetState.blocked = [
+      { atMs: Date.now(), jobId: job.id, title: job.title, providerId: job.providerId, reason: detail },
+      ...(mediaBudgetState.blocked || []),
+    ].slice(0, 40);
+  }
+  saveMediaBudgetToDisk();
+}
+
+function buildMediaProviderPayload(job) {
+  const base = {
+    jobId: job.id,
+    title: job.title,
+    prompt: job.prompt,
+    safety: "Do not publish, contact third parties, or spend credits without explicit human approval.",
+  };
+  if (job.providerId === "elevenlabs") {
+    return { provider: "elevenlabs", endpoint: "text-to-speech", body: { ...base, voice: "pt-BR natural", format: "mp3" } };
+  }
+  if (job.providerId === "creatomate") {
+    return { provider: "creatomate", endpoint: "render-template", body: { ...base, template: "jrc-short-video", render: "requires_human_approval" } };
+  }
+  if (job.providerId === "fal") {
+    return { provider: "fal", endpoint: "queued-generation", body: { ...base, model: "selected_after_approval", mode: "video_or_image" } };
+  }
+  if (job.providerId === "replicate") {
+    return { provider: "replicate", endpoint: "predictions", body: { ...base, version: "selected_after_approval" } };
+  }
+  if (job.providerId === "ideogram") {
+    return { provider: "ideogram", endpoint: "image-generation", body: { ...base, aspectRatio: "4:5", textAccuracy: "high" } };
+  }
+  return { provider: job.providerId, endpoint: "image-generation", body: { ...base, aspectRatio: "4:5" } };
+}
+
+function summarizeMediaJobs(limit = 6) {
+  const jobs = mediaJobState.jobs.filter((job) => !job.archived);
+  const byStatus = {};
+  for (const job of jobs) {
+    byStatus[job.status] = Number(byStatus[job.status] || 0) + 1;
+  }
+  const pendingApproval = jobs.filter((job) => job.approval?.status === "pending").length;
+  return {
+    total: jobs.length,
+    byStatus,
+    pendingApproval,
+    latest: jobs
+      .slice()
+      .sort((left, right) => Number(right.updatedAtMs || 0) - Number(left.updatedAtMs || 0))
+      .slice(0, limit),
+  };
+}
+
+function createMediaJob(input = {}) {
+  const kind = normalizeMediaKind(input.kind);
+  const providerId = normalizeMediaProvider(input.providerId, kind);
+  const prompt = typeof input.prompt === "string" && input.prompt.trim()
+    ? input.prompt.trim()
+    : "Criativo educativo BPC/LOAS para Instagram, sem publicar.";
+  const title = typeof input.title === "string" && input.title.trim()
+    ? input.title.trim()
+    : `Midia JRC - ${kind} via ${providerId}`;
+  const estimate = estimateMediaCost(kind, providerId);
+  const approvalRequired = requiresMediaApproval(kind, providerId, estimate);
+  const createdAt = nowIso();
+  const trace = recordTrace({
+    kind: "media.job.create",
+    status: approvalRequired ? "pending_approval" : "draft",
+    agentId: "jrc-amy",
+    domain: "marketing",
+    riskLevel: approvalRequired ? "medium" : "low",
+    message: `${title} (${kind}/${providerId})`,
+  });
+  const job = {
+    id: `media-job-${todayKey()}-${randomId()}`,
+    kind,
+    providerId,
+    title,
+    prompt,
+    domain: typeof input.domain === "string" && input.domain.trim() ? input.domain.trim() : "marketing",
+    priority: normalizePriority(input.priority || "normal"),
+    status: approvalRequired ? "pending_approval" : "draft",
+    createdAt,
+    updatedAt: createdAt,
+    updatedAtMs: Date.now(),
+    estimate,
+    approval: {
+      required: approvalRequired,
+      status: approvalRequired ? "pending" : "not_required",
+      reason: approvalRequired
+        ? "Geracao de midia pode consumir creditos ou ser usada externamente; exige aprovacao humana."
+        : "",
+      resolvedAt: null,
+      resolvedBy: null,
+    },
+    providerPayload: null,
+    outputs: [],
+    notes: ["Criado como job local. Nenhuma chamada externa foi executada."],
+    traceId: trace.id,
+    archived: false,
+  };
+  mediaJobState = { version: 1, jobs: [job, ...mediaJobState.jobs].slice(0, 200) };
+  saveMediaJobsToDisk();
+  return job;
+}
+
+function updateMediaJob(id, patch = {}) {
+  const index = mediaJobState.jobs.findIndex((job) => job.id === id);
+  if (index < 0) throw new Error(`Media job ${id} not found`);
+  const job = { ...mediaJobState.jobs[index], approval: { ...(mediaJobState.jobs[index].approval || {}) } };
+  if (typeof patch.title === "string" && patch.title.trim()) job.title = patch.title.trim();
+  if (typeof patch.prompt === "string" && patch.prompt.trim()) job.prompt = patch.prompt.trim();
+  if (typeof patch.status === "string" && MEDIA_JOB_STATUSES.has(patch.status)) job.status = patch.status;
+  if (typeof patch.priority === "string") job.priority = normalizePriority(patch.priority);
+  if (typeof patch.note === "string" && patch.note.trim()) job.notes = [...(job.notes || []), patch.note.trim()];
+  if (typeof patch.archived === "boolean") job.archived = patch.archived;
+  if (typeof patch.approvalStatus === "string" && MEDIA_APPROVAL_STATUSES.has(patch.approvalStatus)) {
+    job.approval.status = patch.approvalStatus;
+    if (patch.approvalStatus === "approved" || patch.approvalStatus === "rejected") {
+      job.approval.resolvedAt = nowIso();
+      job.approval.resolvedBy = "human";
+      job.status = patch.approvalStatus === "approved" ? "approved" : "rejected";
+    }
+  }
+  job.updatedAt = nowIso();
+  job.updatedAtMs = Date.now();
+  mediaJobState.jobs[index] = job;
+  saveMediaJobsToDisk();
+  return job;
+}
+
+function runMediaJob(id, options = {}) {
+  const index = mediaJobState.jobs.findIndex((job) => job.id === id);
+  if (index < 0) throw new Error(`Media job ${id} not found`);
+  const job = mediaJobState.jobs[index];
+  const budget = getMediaBudgetStatus();
+  if (budget.remainingTotal <= 0) {
+    recordMediaBudget(job, "blocked", "daily_media_prepare_limit");
+    return { dryRun: true, blocked: true, reason: "daily_media_prepare_limit", job, budget: getMediaBudgetStatus() };
+  }
+  const dryRun = options.dryRun !== false;
+  const approved = job.approval?.status === "approved" || job.approval?.status === "not_required";
+  const providerPayload = buildMediaProviderPayload(job);
+  const plan = {
+    title: job.title,
+    kind: job.kind,
+    providerId: job.providerId,
+    steps: [
+      "Validar briefing, publico e risco OAB.",
+      "Preparar prompt/payload do provedor sem enviar chamada externa.",
+      "Revisar custo estimado e aprovacao humana.",
+      "Somente depois de aprovacao explicita executar provedor fora do dry-run.",
+    ],
+    providerPayload,
+  };
+  if (!approved) {
+    const updated = updateMediaJob(job.id, {
+      status: "pending_approval",
+      note: "Dry-run preparado; aguardando aprovacao humana antes de qualquer geracao paga.",
+    });
+    recordTrace({
+      kind: "media.job.run",
+      status: "pending_approval",
+      agentId: "jrc-amy",
+      domain: updated.domain,
+      riskLevel: "medium",
+      message: updated.title,
+    });
+    return { dryRun, blocked: true, reason: "human_approval_required", plan, job: updated, budget: getMediaBudgetStatus() };
+  }
+  const updated = updateMediaJob(job.id, {
+    status: "ready",
+    note: dryRun
+      ? "Dry-run concluido; payload pronto, sem chamada externa."
+      : "Payload pronto. Execucao real de provedor permanece desligada neste build.",
+  });
+  updated.providerPayload = providerPayload;
+  mediaJobState.jobs[index] = updated;
+  saveMediaJobsToDisk();
+  recordMediaBudget(updated, "prepared");
+  recordTrace({
+    kind: "media.job.run",
+    status: "ready",
+    agentId: "jrc-amy",
+    domain: updated.domain,
+    riskLevel: "medium",
+    message: `${updated.title} preparado sem chamada externa.`,
+  });
+  return { dryRun, preparedOnly: true, externalCallMade: false, plan, job: updated, budget: getMediaBudgetStatus() };
+}
+
+
 function loadMeetingsFromDisk() {
   try {
     if (!fs.existsSync(MEETINGS_FILE)) return;
@@ -2685,74 +3151,7 @@ function getEnginePolicyStatus() {
 }
 
 function getMediaOpsStatus() {
-  const providers = [
-    {
-      id: "elevenlabs",
-      label: "ElevenLabs",
-      kind: "voice",
-      env: "ELEVENLABS_API_KEY",
-      role: "voz natural e voice clone para videos HeyGen/Reels",
-      defaultUse: "roteiro -> voz PT-BR natural",
-      approval: "required_for_publish",
-    },
-    {
-      id: "google-gemini",
-      label: "Google/Gemini",
-      kind: "image",
-      env: "GOOGLE_API_KEY",
-      role: "nano-banana/Gemini image para criativos e imagens isoladas",
-      defaultUse: "imagem estatica e variacoes de campanha",
-      approval: "required_for_external_use",
-    },
-    {
-      id: "openai",
-      label: "OpenAI",
-      kind: "image",
-      env: "OPENAI_API_KEY",
-      role: "fallback de imagem/vision quando modelo local nao basta",
-      defaultUse: "criativo pontual e analise visual nao sensivel",
-      approval: "required_for_sensitive_docs",
-    },
-    {
-      id: "fal",
-      label: "Fal.ai",
-      kind: "image_video",
-      env: "FAL_API_KEY",
-      role: "Flux/Veo/Kling e geracao de B-roll",
-      defaultUse: "video curto, B-roll e imagem premium",
-      approval: "required_for_paid_generation",
-    },
-    {
-      id: "replicate",
-      label: "Replicate",
-      kind: "image_video",
-      env: "REPLICATE_API_KEY",
-      role: "fallback para modelos de imagem/video",
-      defaultUse: "experimentos controlados e fallback",
-      approval: "required_for_paid_generation",
-    },
-    {
-      id: "ideogram",
-      label: "Ideogram",
-      kind: "image",
-      env: "IDEOGRAM_API_KEY",
-      role: "arte com texto e criativos de campanha",
-      defaultUse: "posts com lettering/titulos",
-      approval: "required_for_external_use",
-    },
-    {
-      id: "creatomate",
-      label: "Creatomate",
-      kind: "video_edit",
-      env: "CREATOMATE_API_KEY",
-      role: "montagem programatica de videos, templates e render",
-      defaultUse: "juntar voz, avatar, legenda e B-roll",
-      approval: "required_for_publish",
-    },
-  ].map((provider) => ({
-    ...provider,
-    configured: Boolean(process.env[provider.env]?.trim()),
-  }));
+  const providers = getMediaProviders();
   const configuredCount = providers.filter((provider) => provider.configured).length;
   const missing = providers.filter((provider) => !provider.configured).map((provider) => provider.id);
   return {
@@ -2774,6 +3173,8 @@ function getMediaOpsStatus() {
       publishRequiresApproval: true,
       highCostVideoRequiresApproval: true,
     },
+    jobs: summarizeMediaJobs(),
+    budget: getMediaBudgetStatus(),
     recommendedDefault: "ElevenLabs -> HeyGen/MCP -> Creatomate -> Fal/Replicate B-roll, com aprovacao antes de gastar alto ou publicar.",
     missing,
   };
@@ -2782,6 +3183,8 @@ function getMediaOpsStatus() {
 loadMeetingsFromDisk();
 loadCostModeFromDisk();
 loadTracesFromDisk();
+loadMediaJobsFromDisk();
+loadMediaBudgetFromDisk();
 
 function summarizeOperationalTasks() {
   const tasks = listTasks(false);
@@ -2865,12 +3268,14 @@ function getRiskPanelStatus(engineUsage = null, hubStatus = null) {
   const blockedTasks = tasks.filter((task) => task.status === "blocked");
   const reviewTasks = tasks.filter((task) => task.status === "review");
   const highRiskTasks = tasks.filter((task) => task.riskLevel === "high" || inferRiskLevel(task) === "high");
+  const mediaJobs = summarizeMediaJobs();
   const blockedEngines = Array.isArray(engineUsage?.blocked) ? engineUsage.blocked.length : 0;
   const hubFailures = hubStatus?.sources
     ? Object.values(hubStatus.sources).filter((source) => !source?.ok).length
     : hubStatus?.ok === false ? 1 : 0;
   const flags = [];
   if (pendingApprovals.length) flags.push(`${pendingApprovals.length} aprovacao(oes) humana(s) pendente(s)`);
+  if (mediaJobs.pendingApproval) flags.push(`${mediaJobs.pendingApproval} aprovacao(oes) de midia pendente(s)`);
   if (blockedTasks.length) flags.push(`${blockedTasks.length} tarefa(s) bloqueada(s)`);
   if (reviewTasks.length) flags.push(`${reviewTasks.length} tarefa(s) em revisao`);
   if (budget.remainingTotal <= 1) flags.push("budget diario baixo");
@@ -2882,6 +3287,7 @@ function getRiskPanelStatus(engineUsage = null, hubStatus = null) {
   return {
     level,
     pendingApprovals: pendingApprovals.length,
+    mediaApprovals: mediaJobs.pendingApproval,
     blockedTasks: blockedTasks.length,
     reviewTasks: reviewTasks.length,
     highRiskTasks: highRiskTasks.length,
@@ -2939,6 +3345,7 @@ function buildEndOfDayReport() {
     `- Modo de custo: ${ops.costMode.mode}`,
     `- Risco operacional: ${ops.risk.level} (${ops.risk.flags.join("; ") || "sem alertas"})`,
     `- Midia configurada: ${ops.media.configuredCount}/${ops.media.total}`,
+    `- Jobs de midia: ${ops.media.jobs.total} (${ops.media.jobs.pendingApproval} aprovacao/oes)`,
     "",
     "## Por area",
     ...ops.today.summary.map((item) => `- ${item.label}: ${item.value}`),
@@ -2960,6 +3367,8 @@ function buildEndOfDayReport() {
     "",
     "## Media Ops",
     ...ops.media.providers.map((provider) => `- ${provider.label}: ${provider.configured ? "configurado" : "faltando"} (${provider.kind})`),
+    `- Preparacoes de midia hoje: ${ops.media.budget.preparedRuns}/${ops.media.budget.limits.preparedDaily}`,
+    ...ops.media.jobs.latest.slice(0, 5).map((job) => `- Job ${job.id}: ${job.status} / ${job.kind} / ${job.providerId}`),
     "",
     "## Safety",
     "- Auto-run global permanece conforme .env.",

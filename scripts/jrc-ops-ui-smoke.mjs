@@ -43,6 +43,8 @@ if (!/modo de custo/i.test(text)) failures.push("missing cost mode");
 if (!/risco operacional/i.test(text)) failures.push("missing risk panel");
 if (!/auditoria e traces/i.test(text)) failures.push("missing trace audit");
 if (!/media ops/i.test(text)) failures.push("missing media ops");
+if (!/criar imagem/i.test(text)) failures.push("missing media image action");
+if (!/dry-run/i.test(text)) failures.push("missing media dry-run action");
   if (maxUpdateErrors.length > 0) failures.push("React maximum update loop");
   if (errors.length > maxUpdateErrors.length) failures.push("console errors");
 
@@ -71,6 +73,7 @@ if (!/media ops/i.test(text)) failures.push("missing media ops");
         hasRisk: true,
         hasTraces: true,
         hasMediaOps: true,
+        hasMediaJobs: true,
         maxUpdateErrors: 0,
         consoleErrors: 0,
       },

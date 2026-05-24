@@ -12,11 +12,14 @@ const OPS_MODE_FILE = path.join(HOME, ".hermes", "jrc-office-ops-mode.json");
 const COST_MODE_FILE = path.join(HOME, ".hermes", "jrc-office-cost-mode.json");
 const MEETINGS_FILE = path.join(HOME, ".hermes", "jrc-office-meetings.json");
 const TRACES_FILE = path.join(HOME, ".hermes", "jrc-office-traces.json");
+const MEDIA_JOBS_FILE = path.join(HOME, ".hermes", "jrc-media-jobs.json");
+const MEDIA_BUDGET_FILE = path.join(HOME, ".hermes", "jrc-media-budget.json");
 
 const HERMES_API_URL = (process.env.HERMES_API_URL || "http://127.0.0.1:18642").replace(/\/$/, "");
 const JRC_TASK_RUN_DAILY_LIMIT = Number.parseInt(process.env.JRC_TASK_RUN_DAILY_LIMIT || "6", 10);
 const JRC_TASK_RUN_DOMAIN_DAILY_LIMIT = Number.parseInt(process.env.JRC_TASK_RUN_DOMAIN_DAILY_LIMIT || "2", 10);
 const JRC_TASK_RUN_COOLDOWN_MS = Number.parseInt(process.env.JRC_TASK_RUN_COOLDOWN_MS || "180000", 10);
+const JRC_MEDIA_PREP_DAILY_LIMIT = Number.parseInt(process.env.JRC_MEDIA_PREP_DAILY_LIMIT || "12", 10);
 const JRC_AUTO_RUN_ENABLED = process.env.JRC_AUTO_RUN_ENABLED === "1";
 const JRC_HUB_BASE_URL = (process.env.JRC_HUB_BASE_URL || "http://127.0.0.1:8150").replace(/\/$/, "");
 const JRC_HUB_MCP_READONLY_KEY = process.env.JRC_HUB_MCP_READONLY_KEY || "";
@@ -186,6 +189,123 @@ const loadTraces = () => {
   };
 };
 
+const normalizeMediaKind = (kind: unknown) =>
+  typeof kind === "string" && ["image", "video", "voice", "avatar", "edit", "carousel", "ad_creative"].includes(kind)
+    ? kind
+    : "ad_creative";
+
+const normalizeMediaProvider = (providerId: unknown, kind: string) => {
+  const value = typeof providerId === "string" ? providerId : "";
+  if (["elevenlabs", "google-gemini", "openai", "fal", "replicate", "ideogram", "creatomate"].includes(value)) {
+    return value;
+  }
+  if (kind === "voice") return "elevenlabs";
+  if (kind === "video" || kind === "avatar" || kind === "edit") return "creatomate";
+  if (kind === "carousel" || kind === "ad_creative") return "ideogram";
+  return "google-gemini";
+};
+
+const estimateMediaCost = (kind: string, providerId: string) => {
+  if (providerId === "fal" || providerId === "replicate" || kind === "video" || kind === "avatar") {
+    return { costUsdMin: 1, costUsdMax: 5, tier: "high", credits: "paid_video" };
+  }
+  if (providerId === "creatomate" || kind === "edit" || providerId === "elevenlabs" || kind === "voice") {
+    return { costUsdMin: 0.05, costUsdMax: 0.5, tier: "medium", credits: "render_or_voice" };
+  }
+  return { costUsdMin: 0.02, costUsdMax: 0.2, tier: "low", credits: "image" };
+};
+
+const loadMediaJobs = () => {
+  const parsed = readJsonFile(MEDIA_JOBS_FILE);
+  const jobs = Array.isArray(parsed?.jobs)
+    ? parsed.jobs.filter((job): job is JsonRecord =>
+        Boolean(job && typeof job === "object" && !Array.isArray(job) && typeof (job as JsonRecord).id === "string" && !(job as JsonRecord).archived),
+      )
+    : [];
+  const byStatus: Record<string, number> = {};
+  for (const job of jobs) {
+    const status = typeof job.status === "string" ? job.status : "draft";
+    byStatus[status] = (byStatus[status] || 0) + 1;
+  }
+  return {
+    total: jobs.length,
+    byStatus,
+    pendingApproval: jobs.filter((job) => {
+      const approval = job.approval && typeof job.approval === "object" && !Array.isArray(job.approval)
+        ? (job.approval as JsonRecord)
+        : null;
+      return approval?.status === "pending";
+    }).length,
+    latest: jobs
+      .sort((left, right) => Number(right.updatedAtMs || 0) - Number(left.updatedAtMs || 0))
+      .slice(0, 6),
+  };
+};
+
+const loadMediaBudget = () => {
+  const parsed = readJsonFile(MEDIA_BUDGET_FILE);
+  const date = typeof parsed?.date === "string" ? parsed.date : todayKey();
+  const sameDay = date === todayKey();
+  const preparedRuns = sameDay && typeof parsed?.preparedRuns === "number" ? parsed.preparedRuns : 0;
+  return {
+    date: sameDay ? date : todayKey(),
+    preparedRuns,
+    byProvider:
+      sameDay && parsed?.byProvider && typeof parsed.byProvider === "object" && !Array.isArray(parsed.byProvider)
+        ? parsed.byProvider
+        : {},
+    blocked: sameDay && Array.isArray(parsed?.blocked) ? parsed.blocked.slice(0, 40) : [],
+    limits: {
+      preparedDaily: JRC_MEDIA_PREP_DAILY_LIMIT,
+      externalSpendRequiresApproval: true,
+      publishRequiresApproval: true,
+      actualProviderCallsEnabled: false,
+    },
+    remainingTotal: Math.max(0, JRC_MEDIA_PREP_DAILY_LIMIT - preparedRuns),
+  };
+};
+
+const createMediaJob = (input: JsonRecord) => {
+  const kind = normalizeMediaKind(input.kind);
+  const providerId = normalizeMediaProvider(input.providerId, kind);
+  const prompt = typeof input.prompt === "string" && input.prompt.trim()
+    ? input.prompt.trim()
+    : "Criativo educativo BPC/LOAS para Instagram, sem publicar.";
+  const title = typeof input.title === "string" && input.title.trim()
+    ? input.title.trim()
+    : `Midia JRC - ${kind} via ${providerId}`;
+  const now = new Date().toISOString();
+  const job = {
+    id: `media-job-${todayKey()}-${Math.random().toString(16).slice(2, 14)}`,
+    kind,
+    providerId,
+    title,
+    prompt,
+    domain: "marketing",
+    priority: typeof input.priority === "string" ? input.priority : "normal",
+    status: "pending_approval",
+    createdAt: now,
+    updatedAt: now,
+    updatedAtMs: Date.now(),
+    estimate: estimateMediaCost(kind, providerId),
+    approval: {
+      required: true,
+      status: "pending",
+      reason: "Geracao de midia pode consumir creditos ou ser usada externamente; exige aprovacao humana.",
+      resolvedAt: null,
+      resolvedBy: null,
+    },
+    providerPayload: null,
+    outputs: [],
+    notes: ["Criado pelo fallback HTTP. Nenhuma chamada externa foi executada."],
+    archived: false,
+  };
+  const parsed = readJsonFile(MEDIA_JOBS_FILE);
+  const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
+  writeJsonFile(MEDIA_JOBS_FILE, { version: 1, jobs: [job, ...jobs].slice(0, 200) });
+  return job;
+};
+
 const inferRiskLevel = (task: JsonRecord) => {
   const approval = task.approval && typeof task.approval === "object" && !Array.isArray(task.approval)
     ? (task.approval as JsonRecord)
@@ -206,9 +326,11 @@ const buildRiskStatus = (tasksStatus: ReturnType<typeof loadTasks>, budget: Retu
       )
     : [];
   const highRiskTasks = tasks.filter((task) => task.riskLevel === "high" || inferRiskLevel(task) === "high");
+  const mediaJobs = loadMediaJobs();
   const engineBlocked = Array.isArray(engines.blocked) ? engines.blocked.length : 0;
   const flags = [];
   if (tasksStatus.approval.pending) flags.push(`${tasksStatus.approval.pending} aprovacao(oes) humana(s) pendente(s)`);
+  if (mediaJobs.pendingApproval) flags.push(`${mediaJobs.pendingApproval} aprovacao(oes) de midia pendente(s)`);
   if (tasksStatus.byStatus.blocked) flags.push(`${tasksStatus.byStatus.blocked} tarefa(s) bloqueada(s)`);
   if (tasksStatus.byStatus.review) flags.push(`${tasksStatus.byStatus.review} tarefa(s) em revisao`);
   if (budget.remainingTotal <= 1) flags.push("budget diario baixo");
@@ -216,6 +338,7 @@ const buildRiskStatus = (tasksStatus: ReturnType<typeof loadTasks>, budget: Retu
   return {
     level: flags.length ? "attention" : "normal",
     pendingApprovals: tasksStatus.approval.pending,
+    mediaApprovals: mediaJobs.pendingApproval,
     blockedTasks: tasksStatus.byStatus.blocked || 0,
     reviewTasks: tasksStatus.byStatus.review || 0,
     highRiskTasks: highRiskTasks.length,
@@ -441,6 +564,8 @@ const buildMediaOpsStatus = () => {
       publishRequiresApproval: true,
       highCostVideoRequiresApproval: true,
     },
+    jobs: loadMediaJobs(),
+    budget: loadMediaBudget(),
     recommendedDefault: "ElevenLabs -> HeyGen/MCP -> Creatomate -> Fal/Replicate B-roll, com aprovacao antes de gastar alto ou publicar.",
     missing,
   };
@@ -494,10 +619,16 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { action?: unknown; mode?: unknown };
+    const body = (await request.json()) as JsonRecord & { action?: unknown; mode?: unknown };
     const action = typeof body.action === "string" ? body.action : "mode.set";
-    if (action !== "mode.set" && action !== "costMode.set") {
-      return NextResponse.json({ error: "Fallback HTTP only supports mode.set and costMode.set. Connect gateway for team meetings." }, { status: 400 });
+    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create") {
+      return NextResponse.json({ error: "Fallback HTTP only supports mode.set, costMode.set and media.jobs.create. Connect gateway for execution actions." }, { status: 400 });
+    }
+    if (action === "media.jobs.create") {
+      createMediaJob(body);
+      return NextResponse.json(await buildOpsStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     if (action === "costMode.set") {
       const mode = normalizeCostMode(body.mode);
