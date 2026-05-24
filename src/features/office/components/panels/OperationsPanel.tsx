@@ -242,6 +242,28 @@ type OpsStatus = {
       obsidianPath?: string | null;
     }>;
   };
+  strategicPilots?: {
+    total?: number;
+    readyNow?: number;
+    byStatus?: Record<string, number>;
+    hardLocks?: string[];
+    latest?: Array<{
+      id?: string;
+      rank?: number;
+      title?: string;
+      domain?: string;
+      ownerAgentId?: string;
+      status?: string;
+      integrationMode?: string;
+      why?: string;
+      capabilities?: string[];
+      nextActions?: string[];
+      hardLocks?: string[];
+      activeTasks?: number;
+      pendingApprovals?: number;
+      readyNow?: boolean;
+    }>;
+  };
   jrcHub?: {
     ok?: boolean;
     readOnlyKeyConfigured?: boolean;
@@ -654,6 +676,22 @@ export function OperationsPanel({
     });
   }, [client, runGatewayAction, status]);
 
+  const handleSeedStrategicPilots = useCallback(() => {
+    void runGatewayAction("strategicPilotsSeed", async () => {
+      if (status === "connected") return client.call("strategicPilots.seedTop4", {});
+      return fetch("/api/office/ops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "strategicPilots.seedTop4" }),
+      }).then(async (response) => {
+        const payload = (await response.json()) as OpsStatus & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Failed to seed strategic pilots.");
+        setSnapshot(payload);
+        return payload;
+      });
+    });
+  }, [client, runGatewayAction, status]);
+
   const currentMode = snapshot?.mode?.mode ?? "assisted";
   const currentCostMode = snapshot?.costMode?.mode ?? "balanced";
   const engineEntries = useMemo(
@@ -975,6 +1013,71 @@ export function OperationsPanel({
           </div>
           <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
             Links viram notas, tarefas e revisao cetica; modinha nao entra em producao sem prova.
+          </div>
+        </section>
+
+        <section className="mt-3 rounded border border-emerald-400/15 bg-emerald-950/10 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-emerald-100/75">
+              Pilotos top 4
+            </div>
+            <div className="font-mono text-[10px] text-emerald-100/50">
+              {formatNumber(snapshot?.strategicPilots?.readyNow)} / {formatNumber(snapshot?.strategicPilots?.total)}
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Prontos</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.strategicPilots?.readyNow)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Ativos</div>
+              <div className="mt-1 text-lg font-semibold">
+                {formatNumber((snapshot?.strategicPilots?.latest ?? []).reduce((sum, pilot) => sum + Number(pilot.activeTasks ?? 0), 0))}
+              </div>
+            </div>
+            <div className="rounded border border-amber-300/15 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-amber-100/45">OK?</div>
+              <div className="mt-1 text-lg font-semibold">
+                {formatNumber((snapshot?.strategicPilots?.latest ?? []).reduce((sum, pilot) => sum + Number(pilot.pendingApprovals ?? 0), 0))}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSeedStrategicPilots}
+            disabled={actionBusy !== null}
+            className="mt-3 w-full rounded border border-emerald-400/25 bg-emerald-500/10 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-emerald-50 transition hover:border-emerald-300/45 disabled:opacity-45"
+          >
+            {actionBusy === "strategicPilotsSeed" ? "Ativando" : "Ativar top 4"}
+          </button>
+          <div className="mt-3 space-y-2">
+            {(snapshot?.strategicPilots?.latest ?? []).map((pilot) => (
+              <div key={pilot.id ?? pilot.title} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+                <div className="flex items-start gap-2">
+                  <div className="rounded border border-emerald-300/20 bg-emerald-500/10 px-2 py-1 font-mono text-[10px] text-emerald-100">
+                    #{formatNumber(pilot.rank)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-xs text-white/85">{pilot.title}</div>
+                    <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
+                      {pilot.domain} / {pilot.integrationMode} / {pilot.status}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2 line-clamp-2 text-[11px] leading-4 text-white/45">{pilot.why}</div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(pilot.nextActions ?? []).slice(0, 2).map((item) => (
+                    <span key={item} className="rounded border border-emerald-300/15 bg-black/20 px-2 py-1 text-[10px] text-emerald-100/65">
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
+            NotebookLM, Agent OS, Gemini Omni e Qwen3-TTS entram como pilotos controlados; custo, dados e publicacao ficam travados.
           </div>
         </section>
 
@@ -1378,6 +1481,22 @@ export function OperationsPanel({
               className="rounded border border-white/10 bg-black/20 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-white/65 transition hover:border-fuchsia-400/30 hover:text-white disabled:opacity-45"
             >
               {actionBusy === "mediaCreate:edit" ? "Criando" : "Criar edicao"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCreateMediaJob("video", "gemini-omni")}
+              disabled={actionBusy !== null}
+              className="rounded border border-white/10 bg-black/20 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-white/65 transition hover:border-fuchsia-400/30 hover:text-white disabled:opacity-45"
+            >
+              {actionBusy === "mediaCreate:video" ? "Criando" : "Video Omni"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCreateMediaJob("voice", "qwen3-tts")}
+              disabled={actionBusy !== null}
+              className="rounded border border-white/10 bg-black/20 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-white/65 transition hover:border-fuchsia-400/30 hover:text-white disabled:opacity-45"
+            >
+              {actionBusy === "mediaCreate:voice" ? "Criando" : "Voz Qwen"}
             </button>
           </div>
           <div className="mt-3 space-y-2">

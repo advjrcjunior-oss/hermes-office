@@ -29,6 +29,8 @@ if (typeof payload?.virtualOffice?.coveragePct !== "number") failures.push("miss
 if (!Array.isArray(payload?.virtualOffice?.roles)) failures.push("missing virtual office roles");
 if (typeof payload?.secondBrain?.total !== "number") failures.push("missing second brain total");
 if (!Array.isArray(payload?.secondBrain?.latest)) failures.push("missing second brain latest");
+if (typeof payload?.strategicPilots?.total !== "number") failures.push("missing strategic pilots total");
+if (!Array.isArray(payload?.strategicPilots?.latest)) failures.push("missing strategic pilots latest");
 if (!payload?.safety?.externalActionsLocked) failures.push("safety lock is not enabled");
 
 if (failures.length > 0) {
@@ -55,6 +57,8 @@ console.log(
       virtualOfficeCoverage: payload.virtualOffice.coveragePct,
       virtualOfficeRoles: payload.virtualOffice.totalRoles,
       secondBrainInsights: payload.secondBrain.total,
+      strategicPilots: payload.strategicPilots.total,
+      strategicPilotsReady: payload.strategicPilots.readyNow,
       todayReady: payload.today.workflow?.ready ?? 0,
       autoRunEnabled: payload.budget.limits.autoRunEnabled,
       externalActionsLocked: payload.safety.externalActionsLocked,

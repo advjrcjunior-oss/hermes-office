@@ -49,6 +49,8 @@ if (!/escritorio virtual/i.test(text)) failures.push("missing virtual office");
 if (!/assumir rotinas humanas/i.test(text)) failures.push("missing virtual office seed action");
 if (!/second brain/i.test(text)) failures.push("missing second brain");
 if (!/absorver links/i.test(text)) failures.push("missing second brain ingest action");
+if (!/pilotos top 4/i.test(text)) failures.push("missing strategic pilots");
+if (!/ativar top 4/i.test(text)) failures.push("missing strategic pilots action");
   if (maxUpdateErrors.length > 0) failures.push("React maximum update loop");
   if (errors.length > maxUpdateErrors.length) failures.push("console errors");
 
@@ -80,6 +82,7 @@ if (!/absorver links/i.test(text)) failures.push("missing second brain ingest ac
         hasMediaJobs: true,
         hasVirtualOffice: true,
         hasSecondBrain: true,
+        hasStrategicPilots: true,
         maxUpdateErrors: 0,
         consoleErrors: 0,
       },

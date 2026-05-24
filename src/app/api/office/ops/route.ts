@@ -198,7 +198,7 @@ const normalizeMediaKind = (kind: unknown) =>
 
 const normalizeMediaProvider = (providerId: unknown, kind: string) => {
   const value = typeof providerId === "string" ? providerId : "";
-  if (["elevenlabs", "google-gemini", "openai", "fal", "replicate", "ideogram", "creatomate"].includes(value)) {
+  if (["elevenlabs", "google-gemini", "gemini-omni", "qwen3-tts", "openai", "fal", "replicate", "ideogram", "creatomate"].includes(value)) {
     return value;
   }
   if (kind === "voice") return "elevenlabs";
@@ -208,6 +208,12 @@ const normalizeMediaProvider = (providerId: unknown, kind: string) => {
 };
 
 const estimateMediaCost = (kind: string, providerId: string) => {
+  if (providerId === "qwen3-tts") {
+    return { costUsdMin: 0, costUsdMax: 0.05, tier: "low", credits: "local_compute" };
+  }
+  if (providerId === "gemini-omni") {
+    return { costUsdMin: 1, costUsdMax: 6, tier: "high", credits: "paid_video" };
+  }
   if (providerId === "fal" || providerId === "replicate" || kind === "video" || kind === "avatar") {
     return { costUsdMin: 1, costUsdMax: 5, tier: "high", credits: "paid_video" };
   }
@@ -569,6 +575,61 @@ const VIRTUAL_OFFICE_ROLES = [
   },
 ];
 
+const STRATEGIC_PILOTS = [
+  {
+    id: "notebooklm-case-pilot",
+    rank: 1,
+    title: "NotebookLM case pilot",
+    domain: "juridico",
+    ownerAgentId: "jrc-pesquisador",
+    status: "planned",
+    integrationMode: "manual_bridge",
+    why: "Leitura source-grounded de casos: autos, PDFs, linha do tempo, perguntas e riscos antes de peca.",
+    capabilities: ["Resumo ancorado em fontes", "Linha do tempo do caso", "Perguntas ao acervo", "Checklist de risco juridico"],
+    nextActions: ["Criar playbook de corpus por caso.", "Definir checklist de exportacao.", "Testar em BPC e trabalhista."],
+    hardLocks: ["Sem upload de documento de cliente sem revisao LGPD.", "Sem peca final sem revisao JRC."],
+  },
+  {
+    id: "agent-os-hardening",
+    rank: 2,
+    title: "Hermes + OpenClaw Agent OS hardening",
+    domain: "devops",
+    ownerAgentId: "jrc-maestro",
+    status: "in_progress",
+    integrationMode: "native",
+    why: "Transforma o escritorio 3D em central operacional com salas, filas, budget, trace e aprovacoes.",
+    capabilities: ["Delegacao por sala", "Fila de tarefas", "Trava de atos externos", "Budget por dominio"],
+    nextActions: ["Mapear lacunas de seguranca.", "Criar healthcheck das salas.", "Exigir trace por tarefa."],
+    hardLocks: ["Sem bypass de budget.", "Sem protocolo/envio/publicacao/contato externo sem aprovacao humana."],
+  },
+  {
+    id: "gemini-omni-media-pilot",
+    rank: 3,
+    title: "Gemini Omni conversational video pilot",
+    domain: "marketing",
+    ownerAgentId: "jrc-marketing",
+    status: "watch_api",
+    integrationMode: "media_ops_payload",
+    why: "Pode reduzir trabalho humano em variacoes de video e criativos, mas deve entrar como rascunho controlado.",
+    capabilities: ["Edicao conversacional", "Variacoes de cena", "Video educativo", "Briefing para Reels/Ads"],
+    nextActions: ["Manter payload Media Ops pronto.", "Criar roteiro educativo BPC.", "Validar custo e qualidade."],
+    hardLocks: ["Sem geracao paga automatica.", "Sem publicacao ou anuncio sem aprovacao humana/OAB."],
+  },
+  {
+    id: "qwen3-tts-local-pilot",
+    rank: 4,
+    title: "Qwen3-TTS local voice pilot",
+    domain: "marketing",
+    ownerAgentId: "jrc-amy",
+    status: "planned",
+    integrationMode: "local_tts",
+    why: "Voz local/barata para narracoes internas e prototipos, reduzindo consumo de plano/API.",
+    capabilities: ["Narracao local", "Prototipo de audio", "Fallback barato", "Teste antes de ElevenLabs"],
+    nextActions: ["Verificar modelo local.", "Criar roteiro curto BPC.", "Comparar custo/qualidade com ElevenLabs."],
+    hardLocks: ["Sem clone de voz sem autorizacao.", "Sem publicacao de audio sem aprovacao humana."],
+  },
+];
+
 const buildVirtualOfficeStatus = () => {
   const parsed = readJsonFile(TASKS_FILE);
   const tasks = Array.isArray(parsed?.tasks)
@@ -653,6 +714,94 @@ const createVirtualOfficeSeedTasks = () => {
     };
     tasks.unshift(task);
     created.push(task);
+  }
+  writeJsonFile(TASKS_FILE, { version: 1, tasks });
+  return created;
+};
+
+const loadStrategicPilots = () => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks)
+    ? parsed.tasks.filter((task): task is JsonRecord => Boolean(task && typeof task === "object" && !(task as JsonRecord).archived))
+    : [];
+  const byStatus: Record<string, number> = {};
+  const latest = STRATEGIC_PILOTS.map((pilot) => {
+    const pilotTasks = tasks.filter((task) => String(task.sourceEventId || "").startsWith(`strategic-pilot:${pilot.id}:`));
+    byStatus[pilot.status] = (byStatus[pilot.status] || 0) + 1;
+    return {
+      ...pilot,
+      activeTasks: pilotTasks.filter((task) => task.status !== "done").length,
+      pendingApprovals: pilotTasks.filter((task) => {
+        const approval = task.approval && typeof task.approval === "object" && !Array.isArray(task.approval)
+          ? (task.approval as JsonRecord)
+          : null;
+        return approval?.status === "pending";
+      }).length,
+      readyNow: ["manual_bridge", "native", "local_tts"].includes(pilot.integrationMode),
+    };
+  }).sort((left, right) => left.rank - right.rank);
+  return {
+    total: latest.length,
+    readyNow: latest.filter((pilot) => pilot.readyNow).length,
+    byStatus,
+    latest,
+    hardLocks: [
+      "Pilotos criam tarefas e rascunhos internos.",
+      "Nenhuma chamada paga, upload sensivel, publicacao ou ato externo sem aprovacao humana explicita.",
+      "Prioridade: reduzir consumo de planos usando local/Kimi quando a qualidade bastar.",
+    ],
+  };
+};
+
+const createStrategicPilotSeedTasks = () => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+  const now = new Date().toISOString();
+  const created = [];
+  for (const pilot of STRATEGIC_PILOTS) {
+    const specs = [
+      { suffix: "research", agentId: pilot.domain === "marketing" ? "jrc-marketing" : pilot.domain === "devops" ? "jrc-devops" : "jrc-pesquisador", approval: false },
+      { suffix: "implementation", agentId: pilot.ownerAgentId, approval: pilot.rank >= 3 },
+      { suffix: "review", agentId: "jrc-revisor", approval: true },
+    ];
+    for (const spec of specs) {
+      const sourceEventId = `strategic-pilot:${pilot.id}:${spec.suffix}`;
+      if (hasTaskForSource(tasks, sourceEventId)) continue;
+      const task = {
+        id: `jrc-task-${Math.random().toString(16).slice(2, 14)}`,
+        title: `Piloto top ${pilot.rank} - ${spec.suffix}: ${pilot.title}`,
+        description: [
+          `Ranking: ${pilot.rank}`,
+          `Dominio: ${pilot.domain}`,
+          `Modo: ${pilot.integrationMode}`,
+          `Por que importa: ${pilot.why}`,
+          `Capacidades:\n- ${pilot.capabilities.join("\n- ")}`,
+          `Proximas acoes:\n- ${pilot.nextActions.join("\n- ")}`,
+          `Travas:\n- ${pilot.hardLocks.join("\n- ")}`,
+        ].join("\n\n"),
+        status: "todo",
+        source: "playbook",
+        sourceEventId,
+        assignedAgentId: spec.agentId,
+        createdAt: now,
+        updatedAt: now,
+        updatedAtMs: Date.now(),
+        lastActivityAt: now,
+        priority: pilot.rank <= 2 ? "high" : "normal",
+        domain: pilot.domain,
+        notes: ["Seed ranking 1-4. Nenhuma chamada externa ou gasto foi executado."],
+        archived: false,
+        approval: {
+          required: spec.approval,
+          status: spec.approval ? "pending" : "not_required",
+          reason: spec.approval ? "Piloto estrategico pode afetar custo, dados ou uso externo; exige aprovacao humana." : "",
+          resolvedAt: null,
+          resolvedBy: null,
+        },
+      };
+      tasks.unshift(task);
+      created.push(task);
+    }
   }
   writeJsonFile(TASKS_FILE, { version: 1, tasks });
   return created;
@@ -907,6 +1056,25 @@ const buildMediaOpsStatus = () => {
       approval: "required_for_external_use",
     },
     {
+      id: "gemini-omni",
+      label: "Gemini Omni/Flow",
+      kind: "video_edit",
+      env: "GOOGLE_API_KEY",
+      role: "piloto de video conversacional e edicao por prompt quando disponivel",
+      defaultUse: "roteiro -> variacao de cena/video educativo, sempre em rascunho",
+      approval: "required_for_paid_generation",
+    },
+    {
+      id: "qwen3-tts",
+      label: "Qwen3-TTS",
+      kind: "voice_local",
+      env: null,
+      role: "voz local/barata para narracao e prototipos sem consumir plano cloud",
+      defaultUse: "roteiro -> voz PT-BR/EN local quando modelo estiver instalado",
+      approval: "required_for_voice_clone_or_publish",
+      configured: process.env.QWEN3_TTS_ENABLED === "1" || Boolean(process.env.QWEN3_TTS_MODEL_PATH?.trim()),
+    },
+    {
       id: "openai",
       label: "OpenAI",
       kind: "image",
@@ -953,7 +1121,7 @@ const buildMediaOpsStatus = () => {
     },
   ].map((provider) => ({
     ...provider,
-    configured: Boolean(process.env[provider.env]?.trim()),
+    configured: provider.env ? Boolean(process.env[provider.env]?.trim()) : Boolean(provider.configured),
   }));
   const configuredCount = providers.filter((provider) => provider.configured).length;
   const missing = providers.filter((provider) => !provider.configured).map((provider) => provider.id);
@@ -1002,6 +1170,7 @@ const buildOpsStatus = async () => {
     media: buildMediaOpsStatus(),
     virtualOffice: buildVirtualOfficeStatus(),
     secondBrain: loadSecondBrain(),
+    strategicPilots: loadStrategicPilots(),
     jrcHub: buildJrcHubStatus(),
     safety: {
       externalActionsLocked: true,
@@ -1035,8 +1204,14 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as JsonRecord & { action?: unknown; mode?: unknown };
     const action = typeof body.action === "string" ? body.action : "mode.set";
-    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed" && action !== "secondBrain.ingest" && action !== "secondBrain.seedRecent") {
+    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed" && action !== "secondBrain.ingest" && action !== "secondBrain.seedRecent" && action !== "strategicPilots.seedTop4") {
       return NextResponse.json({ error: "Fallback HTTP only supports safe local Ops actions. Connect gateway for execution actions." }, { status: 400 });
+    }
+    if (action === "strategicPilots.seedTop4") {
+      createStrategicPilotSeedTasks();
+      return NextResponse.json(await buildOpsStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     if (action === "secondBrain.ingest") {
       ingestSecondBrain(body);
