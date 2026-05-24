@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import type { RuntimeAgentMessageMode } from "@/lib/runtime/agentMessaging";
+import { extractAssistantEngineMarker } from "@/features/agents/components/chatItems";
 
 export type RemoteAgentChatMessage = {
   id: string;
@@ -121,25 +122,36 @@ export const RemoteAgentChatPanel = memo(function RemoteAgentChatPanel({
             Send a plain-text note to this remote agent.
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={`max-w-[85%] rounded px-3 py-2 ${
-                message.role === "user"
-                  ? "ml-auto bg-cyan-500/15 text-cyan-50"
-                  : message.role === "assistant"
-                    ? "bg-emerald-500/12 text-emerald-50"
-                  : "bg-white/6 text-white/80"
-              }`}
-            >
-              <div className="whitespace-pre-wrap break-words text-[13px] leading-5">
-                {message.text}
-              </div>
-              <div className="mt-2 font-mono text-[10px] text-white/35">
-                {formatTimestamp(message.timestampMs)}
-              </div>
-            </div>
-          ))
+          messages.map((message) => {
+              const marked =
+                message.role === "assistant"
+                  ? extractAssistantEngineMarker(message.text)
+                  : { text: message.text, engine: null };
+              return (
+                <div
+                  key={message.id}
+                  className={`max-w-[85%] rounded px-3 py-2 ${
+                    message.role === "user"
+                      ? "ml-auto bg-cyan-500/15 text-cyan-50"
+                      : message.role === "assistant"
+                        ? "bg-emerald-500/12 text-emerald-50"
+                      : "bg-white/6 text-white/80"
+                  }`}
+                >
+                  {marked.engine ? (
+                    <div className="mb-2 inline-flex rounded border border-emerald-300/20 bg-emerald-400/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-emerald-100/80">
+                      {marked.engine}
+                    </div>
+                  ) : null}
+                  <div className="whitespace-pre-wrap break-words text-[13px] leading-5">
+                    {marked.text}
+                  </div>
+                  <div className="mt-2 font-mono text-[10px] text-white/35">
+                    {formatTimestamp(message.timestampMs)}
+                  </div>
+                </div>
+              );
+            })
         )}
       </div>
 

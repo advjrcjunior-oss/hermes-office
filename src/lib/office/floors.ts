@@ -36,8 +36,8 @@ export type FloorDefinition = {
 export const OFFICE_FLOORS: readonly FloorDefinition[] = [
   {
     id: "lobby",
-    label: "Lobby",
-    shortLabel: "Lobby",
+    label: "Recepcao JRC",
+    shortLabel: "Recepcao",
     provider: "demo",
     kind: "lobby",
     zone: "building",
@@ -58,8 +58,8 @@ export const OFFICE_FLOORS: readonly FloorDefinition[] = [
   },
   {
     id: "hermes-first",
-    label: "Hermes Floor",
-    shortLabel: "Hermes",
+    label: "JRC Operacao",
+    shortLabel: "JRC",
     provider: "hermes",
     kind: "runtime",
     zone: "building",
@@ -80,7 +80,7 @@ export const OFFICE_FLOORS: readonly FloorDefinition[] = [
   },
   {
     id: "claw3d-runtime",
-    label: "Claw3D Runtime Floor",
+    label: "JRC Escritorio 3D",
     shortLabel: "Claw3D",
     provider: "claw3d",
     kind: "runtime",

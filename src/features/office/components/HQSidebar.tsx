@@ -7,6 +7,7 @@ export type HQSidebarTab =
   | "history"
   | "kanban"
   | "playbooks"
+  | "ops"
   | "analytics";
 
 type HQSidebarProps = {
@@ -22,6 +23,7 @@ type HQSidebarProps = {
   historyPanel: ReactNode;
   kanbanPanel: ReactNode;
   playbooksPanel: ReactNode;
+  operationsPanel: ReactNode;
   analyticsPanel: ReactNode;
 };
 
@@ -30,10 +32,11 @@ const TAB_LABELS: Record<HQSidebarTab, string> = {
   history: "History",
   kanban: "Kanban",
   playbooks: "Playbooks",
+  ops: "Ops",
   analytics: "Analytics",
 };
 
-const PRIMARY_TABS: HQSidebarTab[] = ["inbox", "history", "kanban", "playbooks"];
+const PRIMARY_TABS: HQSidebarTab[] = ["inbox", "history", "kanban", "playbooks", "ops"];
 
 export function HQSidebar({
   open,
@@ -48,6 +51,7 @@ export function HQSidebar({
   historyPanel,
   kanbanPanel,
   playbooksPanel,
+  operationsPanel,
   analyticsPanel,
 }: HQSidebarProps) {
   const analyticsOnly = activeTab === "analytics";
@@ -61,8 +65,11 @@ export function HQSidebar({
           ? kanbanPanel
         : activeTab === "playbooks"
           ? playbooksPanel
+        : activeTab === "ops"
+          ? operationsPanel
           : analyticsPanel;
   const boardLikeWidth = activeTab === "kanban";
+  const operationsWidth = activeTab === "ops";
 
   return (
     <aside className="pointer-events-none fixed inset-y-0 right-0 z-20 flex justify-end">
@@ -117,7 +124,7 @@ export function HQSidebar({
       {open ? (
         <div
           className={`pointer-events-auto flex h-full flex-col border-l border-cyan-500/20 bg-black/85 shadow-2xl backdrop-blur ${
-            boardLikeWidth ? "w-[min(94vw,1180px)]" : "w-56"
+            boardLikeWidth ? "w-[min(94vw,1180px)]" : operationsWidth ? "w-[min(94vw,440px)]" : "w-56"
           }`}
         >
           <div className="border-b border-cyan-500/15 px-4 py-3">
@@ -162,7 +169,7 @@ export function HQSidebar({
             <div
               role="tablist"
               aria-label="Headquarters panels"
-              className="grid grid-cols-4 border-b border-cyan-500/15"
+              className="grid grid-cols-5 border-b border-cyan-500/15"
             >
               {PRIMARY_TABS.map((tab) => {
                 const isActive = tab === activeTab;

@@ -354,7 +354,7 @@ export const createStarterOfficeMap = (params: {
   const hallwayZone: OfficeZone = {
     id: "zone_hallway",
     type: "hallway",
-    name: "Hallway",
+    name: "Corredor JRC",
     shape: {
       points: [
         { x: 80, y: 120 },
@@ -367,7 +367,7 @@ export const createStarterOfficeMap = (params: {
   const deskZone: OfficeZone = {
     id: "zone_desks",
     type: "desk_zone",
-    name: "Desk Area",
+    name: "Operacao Juridica",
     shape: {
       points: [
         { x: 120, y: 270 },
@@ -380,7 +380,7 @@ export const createStarterOfficeMap = (params: {
   const meetingZone: OfficeZone = {
     id: "zone_meeting",
     type: "meeting_room",
-    name: "Meeting Room",
+    name: "Sala T0 / Revisao",
     shape: {
       points: [
         { x: 1030, y: 270 },
@@ -393,7 +393,7 @@ export const createStarterOfficeMap = (params: {
   const loungeZone: OfficeZone = {
     id: "zone_lounge",
     type: "lounge",
-    name: "Lounge",
+    name: "Marketing e Comercial",
     shape: {
       points: [
         { x: 1030, y: 560 },
@@ -406,7 +406,7 @@ export const createStarterOfficeMap = (params: {
   const coffeeZone: OfficeZone = {
     id: "zone_coffee",
     type: "coffee_area",
-    name: "Coffee",
+    name: "Atendimento",
     shape: {
       points: [
         { x: 80, y: 20 },
@@ -419,7 +419,7 @@ export const createStarterOfficeMap = (params: {
   const gameZone: OfficeZone = {
     id: "zone_game",
     type: "game_room",
-    name: "Game Room",
+    name: "DevOps / VPS",
     shape: {
       points: [
         { x: 1340, y: 20 },

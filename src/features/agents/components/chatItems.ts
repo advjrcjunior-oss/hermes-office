@@ -15,9 +15,22 @@ type ItemMeta = {
   thinkingDurationMs?: number;
 };
 
+const ENGINE_MARKER_RE = /^\[\[engine:([^\]]+)\]\]\s*/i;
+
+export const extractAssistantEngineMarker = (
+  value: string | null
+): { text: string | null; engine: string | null } => {
+  if (!value) return { text: value, engine: null };
+  const match = value.match(ENGINE_MARKER_RE);
+  if (!match) return { text: value, engine: null };
+  const engine = match[1]?.trim() || null;
+  const text = value.slice(match[0].length).trimStart();
+  return { text: text || null, engine };
+};
+
 export type AgentChatItem =
   | { kind: "user"; text: string; timestampMs?: number }
-  | { kind: "assistant"; text: string; live?: boolean; timestampMs?: number; thinkingDurationMs?: number }
+  | { kind: "assistant"; text: string; live?: boolean; timestampMs?: number; thinkingDurationMs?: number; engine?: string | null }
   | { kind: "tool"; text: string; timestampMs?: number }
   | { kind: "thinking"; text: string; live?: boolean; timestampMs?: number; thinkingDurationMs?: number };
 
@@ -30,6 +43,7 @@ export type AgentChatRenderBlock =
   | {
       kind: "assistant";
       text: string | null;
+      engine?: string | null;
       timestampMs?: number;
       thinkingDurationMs?: number;
       traceEvents: AssistantTraceEvent[];
@@ -161,9 +175,11 @@ export const buildFinalAgentChatItems = ({
     }
     const normalizedAssistant = normalizeAssistantDisplayText(line);
     if (!normalizedAssistant) continue;
+    const marked = extractAssistantEngineMarker(normalizedAssistant);
     items.push({
       kind: "assistant",
-      text: normalizedAssistant,
+      text: marked.text ?? "",
+      engine: marked.engine,
       ...(currentMeta ? { timestampMs: currentMeta.timestampMs, thinkingDurationMs: currentMeta.thinkingDurationMs } : {}),
     });
   }
@@ -257,9 +273,11 @@ export const buildAgentChatItems = ({
     }
     const normalizedAssistant = normalizeAssistantDisplayText(line);
     if (!normalizedAssistant) continue;
+    const marked = extractAssistantEngineMarker(normalizedAssistant);
     items.push({
       kind: "assistant",
-      text: normalizedAssistant,
+      text: marked.text ?? "",
+      engine: marked.engine,
       ...(currentMeta ? { timestampMs: currentMeta.timestampMs, thinkingDurationMs: currentMeta.thinkingDurationMs } : {}),
     });
   }
@@ -326,12 +344,14 @@ export const buildAgentChatRenderBlocks = (
   const ensureAssistant = (meta?: {
     timestampMs?: number;
     thinkingDurationMs?: number;
+    engine?: string | null;
   }) => {
     if (!currentAssistant) {
       currentAssistant = {
         kind: "assistant",
         text: null,
         traceEvents: [],
+        ...(meta?.engine ? { engine: meta.engine } : {}),
         ...(typeof meta?.timestampMs === "number" ? { timestampMs: meta.timestampMs } : {}),
         ...(typeof meta?.thinkingDurationMs === "number"
           ? { thinkingDurationMs: meta.thinkingDurationMs }
@@ -348,6 +368,7 @@ export const buildAgentChatRenderBlocks = (
         kind: "assistant",
         text: null,
         traceEvents: [],
+        ...(meta?.engine ? { engine: meta.engine } : {}),
         ...(typeof meta?.timestampMs === "number" ? { timestampMs: meta.timestampMs } : {}),
         ...(typeof meta?.thinkingDurationMs === "number"
           ? { thinkingDurationMs: meta.thinkingDurationMs }
@@ -363,6 +384,9 @@ export const buildAgentChatRenderBlocks = (
     }
     if (typeof meta?.thinkingDurationMs === "number") {
       currentAssistant.thinkingDurationMs = meta.thinkingDurationMs;
+    }
+    if (!currentAssistant.engine && meta?.engine) {
+      currentAssistant.engine = meta.engine;
     }
     return currentAssistant;
   };
@@ -392,6 +416,7 @@ export const buildAgentChatRenderBlocks = (
     const assistant = ensureAssistant({
       timestampMs: item.timestampMs,
       thinkingDurationMs: item.thinkingDurationMs,
+      engine: item.engine,
     });
     const normalized = item.text.trim();
     if (!normalized) continue;

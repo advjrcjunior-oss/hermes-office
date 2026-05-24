@@ -482,13 +482,14 @@ export const syncCardWithLinkedRun = (
           ? "done"
           : "review";
   const updatedAt = new Date(run.endedAt ?? run.startedAt).toISOString();
-  return {
+  const nextCard = {
     ...card,
     assignedAgentId: card.assignedAgentId ?? run.agentId,
     status,
     updatedAt,
     lastActivityAt: updatedAt,
   };
+  return JSON.stringify(nextCard) === JSON.stringify(card) ? card : nextCard;
 };
 
 const syncCardWithAgent = (
@@ -499,13 +500,16 @@ const syncCardWithAgent = (
   const agent = agents.find((entry) => entry.agentId === card.assignedAgentId);
   if (!agent) return card;
   if (agent.awaitingUserInput && card.status !== "done") {
-    return {
+    const lastActivityAt =
+      agent.lastActivityAt != null
+        ? new Date(agent.lastActivityAt).toISOString()
+        : (card.lastActivityAt ?? card.updatedAt);
+    const nextCard = {
       ...card,
-      status: "blocked",
-      lastActivityAt: new Date(
-        agent.lastActivityAt ?? Date.now(),
-      ).toISOString(),
+      status: "blocked" as const,
+      lastActivityAt,
     };
+    return JSON.stringify(nextCard) === JSON.stringify(card) ? card : nextCard;
   }
   return card;
 };
@@ -579,7 +583,7 @@ const buildStandupSeedCards = (
       if (!title && !note && !blockers) return null;
       const existing =
         existingCards.find((card) => card.id === `standup:${agentId}`) ?? null;
-      const notes = [note, ...normalizeNoteLines(existing?.notes ?? [])];
+      const notes = normalizeNoteLines([note, ...(existing?.notes ?? [])]);
       return makeCard({
         ...(existing ?? {}),
         id: existing?.id ?? `standup:${agentId}`,
@@ -618,10 +622,19 @@ const buildStandupSeedCards = (
 };
 
 const normalizeNoteLines = (notes: string[]) =>
-  notes
-    .map((note) => note.trim())
-    .filter(Boolean)
-    .slice(0, 8);
+  [...new Set(notes.map((note) => note.trim()).filter(Boolean))].slice(0, 8);
+
+const hasCardChanges = (
+  nextCards: TaskBoardCard[],
+  existingCards: TaskBoardCard[],
+) => {
+  for (const nextCard of nextCards) {
+    const existing = existingCards.find((card) => card.id === nextCard.id);
+    if (!existing) return true;
+    if (JSON.stringify(existing) !== JSON.stringify(nextCard)) return true;
+  }
+  return false;
+};
 
 type TaskCaptureDebugState = {
   lastStatus: "idle" | "detected" | "persisted" | "failed" | "unsupported";
@@ -954,12 +967,14 @@ export const useTaskBoardController = ({
     if (!hydratedRef.current) return;
     const playbookCards = buildPlaybookCards(cronJobs, stateRef.current.cards);
     const standupCards = buildStandupSeedCards(standup, stateRef.current.cards);
-    if (playbookCards.length === 0 && standupCards.length === 0) return;
+    const derivedCards = [...playbookCards, ...standupCards];
+    if (derivedCards.length === 0) return;
+    if (!hasCardChanges(derivedCards, stateRef.current.cards)) return;
     dispatch({
       type: "upsertMany",
-      cards: [...playbookCards, ...standupCards],
+      cards: derivedCards,
     });
-  }, [cronJobs, standup]);
+  }, [cronJobs, standup.config]);
 
   useEffect(() => {
     if (!hydratedRef.current) return;

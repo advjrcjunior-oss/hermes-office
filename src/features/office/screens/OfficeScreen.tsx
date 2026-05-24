@@ -160,6 +160,7 @@ import { HistoryPanel } from "@/features/office/components/panels/HistoryPanel";
 import { InboxPanel } from "@/features/office/components/panels/InboxPanel";
 import { KanbanDisabledPanel } from "@/features/office/components/panels/KanbanDisabledPanel";
 import { PlaybooksPanel } from "@/features/office/components/panels/PlaybooksPanel";
+import { OperationsPanel } from "@/features/office/components/panels/OperationsPanel";
 import { SkillsMarketplaceModal } from "@/features/office/components/panels/SkillsMarketplaceModal";
 import { TaskBoardPanel } from "@/features/office/components/panels/TaskBoardPanel";
 import { JukeboxPanel } from "@/features/spotify-jukebox/components/JukeboxPanel";
@@ -1120,7 +1121,10 @@ export function OfficeScreen({
   const activeFloorIdRef = useRef<FloorId>("lobby");
   const floorRosterCacheRef = useRef(floorRosterCache);
   const [gatewayModels, setGatewayModels] = useState<GatewayModelChoice[]>([]);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    const value = searchParams.get("hqOpen")?.trim().toLowerCase();
+    return value === "1" || value === "true" || value === "yes";
+  });
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
   const [kanbanInstallPromptOpen, setKanbanInstallPromptOpen] = useState(false);
   const [kanbanInstallProgress, setKanbanInstallProgress] = useState<{
@@ -1143,8 +1147,16 @@ export function OfficeScreen({
     const searchParams = new URL(window.location.href).searchParams;
     return searchParams.has("code");
   });
-  const [activeSidebarTab, setActiveSidebarTab] =
-    useState<HQSidebarTab>("inbox");
+  const [activeSidebarTab, setActiveSidebarTab] = useState<HQSidebarTab>(() => {
+    const tab = searchParams.get("hq")?.trim().toLowerCase();
+    return tab === "history" ||
+      tab === "kanban" ||
+      tab === "playbooks" ||
+      tab === "ops" ||
+      tab === "analytics"
+      ? tab
+      : "inbox";
+  });
   const pendingJukeboxCommandTimeoutsRef = useRef<
     Map<string, { requestKey: string; timeoutId: number }>
   >(new Map());
@@ -5105,6 +5117,7 @@ export function OfficeScreen({
               standup={standupController}
             />
           }
+          operationsPanel={<OperationsPanel client={client} status={status} />}
           analyticsPanel={
             <AnalyticsPanel
               client={client}

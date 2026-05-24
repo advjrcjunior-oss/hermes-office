@@ -446,6 +446,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
   thinkingToolLines,
   thinkingDurationMs,
   contentText,
+  engine,
   streaming,
 }: {
   avatarSeed: string;
@@ -458,6 +459,7 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
   thinkingToolLines?: string[];
   thinkingDurationMs?: number;
   contentText?: string | null;
+  engine?: string | null;
   streaming?: boolean;
 }) {
   const resolvedTimestamp = typeof timestampMs === "number" ? timestampMs : null;
@@ -485,8 +487,15 @@ const AssistantMessageCard = memo(function AssistantMessageCard({
           />
         </div>
         <div className="flex items-center justify-between gap-3 py-0.5">
-          <div className="type-meta min-w-0 truncate font-mono text-foreground/90">
-            {name}
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="type-meta min-w-0 truncate font-mono text-foreground/90">
+              {name}
+            </div>
+            {engine ? (
+              <span className="shrink-0 rounded border border-cyan-500/20 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-cyan-200/80">
+                {engine}
+              </span>
+            ) : null}
           </div>
           {resolvedTimestamp !== null ? (
             <time className="type-meta shrink-0 rounded-md bg-surface-3 px-2 py-0.5 font-mono text-muted-foreground/90">
@@ -668,6 +677,7 @@ const AgentChatFinalItems = memo(function AgentChatFinalItems({
             thinkingEvents={block.traceEvents}
             thinkingDurationMs={block.thinkingDurationMs}
             contentText={block.text}
+            engine={block.engine}
             streaming={streaming}
           />
         );
