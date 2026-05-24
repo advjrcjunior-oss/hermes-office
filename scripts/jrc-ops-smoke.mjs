@@ -25,6 +25,8 @@ if (!Array.isArray(payload?.media?.providers)) failures.push("missing media ops 
 if (typeof payload?.media?.configuredCount !== "number") failures.push("missing media configured count");
 if (typeof payload?.media?.jobs?.total !== "number") failures.push("missing media jobs total");
 if (!payload?.media?.budget?.limits) failures.push("missing media budget limits");
+if (typeof payload?.virtualOffice?.coveragePct !== "number") failures.push("missing virtual office coverage");
+if (!Array.isArray(payload?.virtualOffice?.roles)) failures.push("missing virtual office roles");
 if (!payload?.safety?.externalActionsLocked) failures.push("safety lock is not enabled");
 
 if (failures.length > 0) {
@@ -48,6 +50,8 @@ console.log(
       mediaConfigured: `${payload.media.configuredCount}/${payload.media.total}`,
       mediaJobs: payload.media.jobs.total,
       mediaPrepRemaining: payload.media.budget.remainingTotal,
+      virtualOfficeCoverage: payload.virtualOffice.coveragePct,
+      virtualOfficeRoles: payload.virtualOffice.totalRoles,
       todayReady: payload.today.workflow?.ready ?? 0,
       autoRunEnabled: payload.budget.limits.autoRunEnabled,
       externalActionsLocked: payload.safety.externalActionsLocked,

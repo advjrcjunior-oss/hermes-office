@@ -45,6 +45,8 @@ if (!/auditoria e traces/i.test(text)) failures.push("missing trace audit");
 if (!/media ops/i.test(text)) failures.push("missing media ops");
 if (!/criar imagem/i.test(text)) failures.push("missing media image action");
 if (!/dry-run/i.test(text)) failures.push("missing media dry-run action");
+if (!/escritorio virtual/i.test(text)) failures.push("missing virtual office");
+if (!/assumir rotinas humanas/i.test(text)) failures.push("missing virtual office seed action");
   if (maxUpdateErrors.length > 0) failures.push("React maximum update loop");
   if (errors.length > maxUpdateErrors.length) failures.push("console errors");
 
@@ -74,6 +76,7 @@ if (!/dry-run/i.test(text)) failures.push("missing media dry-run action");
         hasTraces: true,
         hasMediaOps: true,
         hasMediaJobs: true,
+        hasVirtualOffice: true,
         maxUpdateErrors: 0,
         consoleErrors: 0,
       },

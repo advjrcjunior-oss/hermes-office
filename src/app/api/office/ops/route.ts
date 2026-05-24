@@ -474,6 +474,188 @@ const buildEnginePolicy = () => ({
   ],
 });
 
+const VIRTUAL_OFFICE_ROLES = [
+  {
+    id: "legalmail-triage",
+    department: "juridico",
+    humanRole: "Assistente de prazos/LegalMail",
+    agentId: "jrc-legalmail",
+    autonomyLevel: "assisted",
+    takeover: ["classificar andamentos", "criar tarefas de prazo", "preparar resumo e minuta interna", "separar itens que precisam do Dr."],
+    approvalRequiredFor: ["protocolo", "envio de peticao", "peticao final", "contato externo"],
+  },
+  {
+    id: "bpc-docs",
+    department: "bpc",
+    humanRole: "Organizador documental BPC/LOAS",
+    agentId: "jrc-bpc",
+    autonomyLevel: "assisted",
+    takeover: ["checklist documental", "detectar faltantes", "preparar pacote para revisao", "gerar pendencias internas"],
+    approvalRequiredFor: ["protocolo", "conclusao juridica sensivel", "uso de documento divergente"],
+  },
+  {
+    id: "legal-draft",
+    department: "juridico",
+    humanRole: "Advogado junior de minuta",
+    agentId: "jrc-juridico",
+    autonomyLevel: "review_required",
+    takeover: ["rascunhar peca", "montar tese inicial", "resumir autos", "apontar pedidos e provas"],
+    approvalRequiredFor: ["entrega final", "recurso", "peticao de merito", "tese nova"],
+  },
+  {
+    id: "quality-review",
+    department: "juridico",
+    humanRole: "Revisor/Conferente",
+    agentId: "jrc-revisor",
+    autonomyLevel: "assisted",
+    takeover: ["auditar coerencia", "buscar falhas", "dar score de qualidade", "bloquear ato externo fragil"],
+    approvalRequiredFor: ["liberar protocolo", "derrubar bloqueio de risco alto"],
+  },
+  {
+    id: "commercial-triage",
+    department: "comercial",
+    humanRole: "Atendente/comercial interno",
+    agentId: "jrc-comercial",
+    autonomyLevel: "assisted",
+    takeover: ["classificar lead", "resumir conversa", "criar briefing", "sugerir follow-up"],
+    approvalRequiredFor: ["contatar lead", "enviar contrato", "cobrar retorno"],
+  },
+  {
+    id: "client-support",
+    department: "atendimento",
+    humanRole: "Suporte de atendimento",
+    agentId: "jrc-atendimento",
+    autonomyLevel: "assisted",
+    takeover: ["detectar conversa parada", "identificar objecao", "preparar resposta sugerida", "pedir dado faltante internamente"],
+    approvalRequiredFor: ["mensagem ao cliente", "promessa de resultado", "orientacao juridica final"],
+  },
+  {
+    id: "marketing-ops",
+    department: "marketing",
+    humanRole: "Social media/performance",
+    agentId: "jrc-marketing",
+    autonomyLevel: "assisted",
+    takeover: ["diagnosticar campanha", "criar briefing de criativo", "gerar copy", "enfileirar job de midia"],
+    approvalRequiredFor: ["publicacao", "criativo pago", "alteracao de campanha", "promessa publicitaria"],
+  },
+  {
+    id: "finance-ops",
+    department: "financeiro",
+    humanRole: "Assistente financeiro",
+    agentId: "jrc-financeiro",
+    autonomyLevel: "assisted",
+    takeover: ["resumir recebiveis", "detectar anomalias", "preparar relatorio", "sugerir cobranca interna"],
+    approvalRequiredFor: ["cobranca externa", "negociacao", "alterar contrato", "baixa financeira"],
+  },
+  {
+    id: "devops-ops",
+    department: "devops",
+    humanRole: "DevOps/infra interno",
+    agentId: "jrc-devops",
+    autonomyLevel: "safe_readonly",
+    takeover: ["healthcheck", "ler logs", "mapear incidentes", "preparar plano de correcao"],
+    approvalRequiredFor: ["deploy destrutivo", "apagar dados", "alterar producao", "rotacionar credenciais"],
+  },
+  {
+    id: "chief-of-staff",
+    department: "gestao",
+    humanRole: "Chefe de gabinete operacional",
+    agentId: "jrc-maestro",
+    autonomyLevel: "safe_internal",
+    takeover: ["priorizar o dia", "delegar tarefas", "cobrar pendencias internas", "fechar ata e resumo"],
+    approvalRequiredFor: ["mudar prioridade critica", "executar ato externo", "liberar excecao de safety"],
+  },
+];
+
+const buildVirtualOfficeStatus = () => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks)
+    ? parsed.tasks.filter((task): task is JsonRecord =>
+        Boolean(task && typeof task === "object" && !(task as JsonRecord).archived),
+      )
+    : [];
+  const byDepartment: Record<string, number> = {};
+  const roles = VIRTUAL_OFFICE_ROLES.map((role) => {
+    const activeTasks = tasks.filter((task) => task.assignedAgentId === role.agentId && task.status !== "done");
+    const pendingApprovals = activeTasks.filter((task) => {
+      const approval = task.approval && typeof task.approval === "object" && !Array.isArray(task.approval)
+        ? (task.approval as JsonRecord)
+        : null;
+      return approval?.status === "pending";
+    }).length;
+    byDepartment[role.department] = (byDepartment[role.department] || 0) + 1;
+    return {
+      ...role,
+      agentName: role.agentId,
+      activeTasks: activeTasks.length,
+      pendingApprovals,
+      readyForAutonomy: ["safe_internal", "safe_readonly", "assisted"].includes(role.autonomyLevel),
+    };
+  });
+  const replaceableNow = roles.filter((role) => role.readyForAutonomy).length;
+  return {
+    target: "escritorio_100_virtual_com_aprovacao_humana_para_ato_externo",
+    replaceableNow,
+    totalRoles: roles.length,
+    coveragePct: Math.round((replaceableNow / Math.max(1, roles.length)) * 100),
+    byDepartment,
+    roles,
+    hardLocks: [
+      "Nada de protocolo/envio/publicacao/contato/cobranca sem aprovacao humana explicita.",
+      "Agentes podem preparar, revisar, classificar, resumir, auditar e enfileirar.",
+      "Toda substituicao humana vira fila, trace, budget e aprovacao quando sensivel.",
+    ],
+  };
+};
+
+const hasTaskForSource = (tasks: unknown[], sourceEventId: string) =>
+  tasks.some((task) => task && typeof task === "object" && (task as JsonRecord).sourceEventId === sourceEventId);
+
+const createVirtualOfficeSeedTasks = () => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+  const now = new Date().toISOString();
+  const created = [];
+  for (const role of VIRTUAL_OFFICE_ROLES) {
+    const sourceEventId = `virtual-office:${role.id}:${todayKey()}`;
+    if (hasTaskForSource(tasks, sourceEventId)) continue;
+    const needsHumanApproval = role.autonomyLevel === "review_required";
+    const task = {
+      id: `jrc-task-${Math.random().toString(16).slice(2, 14)}`,
+      title: `Escritorio virtual - assumir rotina: ${role.humanRole}`,
+      description: [
+        `Departamento: ${role.department}`,
+        `Agente responsavel: ${role.agentId}`,
+        `Funcoes que pode assumir:\n- ${role.takeover.join("\n- ")}`,
+        `Exige aprovacao para:\n- ${role.approvalRequiredFor.join("\n- ")}`,
+      ].join("\n\n"),
+      status: "todo",
+      source: "playbook",
+      sourceEventId,
+      assignedAgentId: role.agentId,
+      createdAt: now,
+      updatedAt: now,
+      updatedAtMs: Date.now(),
+      lastActivityAt: now,
+      priority: role.department === "juridico" || role.department === "bpc" ? "high" : "normal",
+      domain: role.department,
+      notes: ["Seed de substituicao de trabalho humano interno. Ato externo permanece bloqueado."],
+      archived: false,
+      approval: {
+        required: needsHumanApproval,
+        status: needsHumanApproval ? "pending" : "not_required",
+        reason: needsHumanApproval ? "Funcao juridica sensivel; resultado deve ir para revisao antes de uso final." : "",
+        resolvedAt: null,
+        resolvedBy: null,
+      },
+    };
+    tasks.unshift(task);
+    created.push(task);
+  }
+  writeJsonFile(TASKS_FILE, { version: 1, tasks });
+  return created;
+};
+
 const buildMediaOpsStatus = () => {
   const providers = [
     {
@@ -588,6 +770,7 @@ const buildOpsStatus = async () => {
     risk: buildRiskStatus(tasks, budget, engines),
     traces: loadTraces(),
     media: buildMediaOpsStatus(),
+    virtualOffice: buildVirtualOfficeStatus(),
     jrcHub: buildJrcHubStatus(),
     safety: {
       externalActionsLocked: true,
@@ -621,8 +804,14 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as JsonRecord & { action?: unknown; mode?: unknown };
     const action = typeof body.action === "string" ? body.action : "mode.set";
-    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create") {
-      return NextResponse.json({ error: "Fallback HTTP only supports mode.set, costMode.set and media.jobs.create. Connect gateway for execution actions." }, { status: 400 });
+    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed") {
+      return NextResponse.json({ error: "Fallback HTTP only supports mode.set, costMode.set, media.jobs.create and virtualOffice.seed. Connect gateway for execution actions." }, { status: 400 });
+    }
+    if (action === "virtualOffice.seed") {
+      createVirtualOfficeSeedTasks();
+      return NextResponse.json(await buildOpsStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     if (action === "media.jobs.create") {
       createMediaJob(body);

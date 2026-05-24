@@ -1986,6 +1986,16 @@ async function handleMethod(method, params, id, sendEvent) {
       saveMediaBudgetToDisk();
       return resOk(id, getMediaBudgetStatus());
 
+    case "virtualOffice.status":
+      return resOk(id, getVirtualOfficeStatus());
+
+    case "virtualOffice.seed":
+      try {
+        return resOk(id, seedVirtualOfficeTasks());
+      } catch (error) {
+        return resErr(id, "INVALID_REQUEST", sanitizeErrorMessage(error));
+      }
+
     case "jrcHub.status":
       try {
         const snapshot = await getJrcHubSnapshot();
@@ -2133,6 +2143,7 @@ function startAdapter() {
               "ops.status","ops.mode.set","ops.costMode.set","ops.traces.list","ops.report.write",
               "media.jobs.list","media.jobs.create","media.jobs.update","media.jobs.approval.resolve",
               "media.jobs.run","media.budget.status","media.budget.reset",
+              "virtualOffice.status","virtualOffice.seed",
               "jrcHub.status","jrcHub.syncTriggers",
               "cron.list","cron.add","cron.remove","cron.patch","cron.run"],
               events: ["chat","presence","heartbeat","cron","task"] },
@@ -2981,6 +2992,220 @@ const DOMAIN_AGENT_MAP = {
   geral: ["jrc-maestro", "jrc-atendimento", "jrc-revisor"],
 };
 
+const VIRTUAL_OFFICE_ROLES = [
+  {
+    id: "legalmail-triage",
+    department: "juridico",
+    humanRole: "Assistente de prazos/LegalMail",
+    agentId: "jrc-legalmail",
+    autonomyLevel: "assisted",
+    takeover: [
+      "classificar andamentos",
+      "criar tarefas de prazo",
+      "preparar resumo e minuta interna",
+      "separar itens que precisam do Dr.",
+    ],
+    approvalRequiredFor: ["protocolo", "envio de peticao", "peticao final", "contato externo"],
+  },
+  {
+    id: "bpc-docs",
+    department: "bpc",
+    humanRole: "Organizador documental BPC/LOAS",
+    agentId: "jrc-bpc",
+    autonomyLevel: "assisted",
+    takeover: [
+      "checklist documental",
+      "detectar faltantes",
+      "preparar pacote para revisao",
+      "gerar pendencias internas",
+    ],
+    approvalRequiredFor: ["protocolo", "conclusao juridica sensivel", "uso de documento divergente"],
+  },
+  {
+    id: "legal-draft",
+    department: "juridico",
+    humanRole: "Advogado junior de minuta",
+    agentId: "jrc-juridico",
+    autonomyLevel: "review_required",
+    takeover: [
+      "rascunhar peca",
+      "montar tese inicial",
+      "resumir autos",
+      "apontar pedidos e provas",
+    ],
+    approvalRequiredFor: ["entrega final", "recurso", "peticao de merito", "tese nova"],
+  },
+  {
+    id: "quality-review",
+    department: "juridico",
+    humanRole: "Revisor/Conferente",
+    agentId: "jrc-revisor",
+    autonomyLevel: "assisted",
+    takeover: [
+      "auditar coerencia",
+      "buscar falhas",
+      "dar score de qualidade",
+      "bloquear ato externo fragil",
+    ],
+    approvalRequiredFor: ["liberar protocolo", "derrubar bloqueio de risco alto"],
+  },
+  {
+    id: "commercial-triage",
+    department: "comercial",
+    humanRole: "Atendente/comercial interno",
+    agentId: "jrc-comercial",
+    autonomyLevel: "assisted",
+    takeover: [
+      "classificar lead",
+      "resumir conversa",
+      "criar briefing",
+      "sugerir follow-up",
+    ],
+    approvalRequiredFor: ["contatar lead", "enviar contrato", "cobrar retorno"],
+  },
+  {
+    id: "client-support",
+    department: "atendimento",
+    humanRole: "Suporte de atendimento",
+    agentId: "jrc-atendimento",
+    autonomyLevel: "assisted",
+    takeover: [
+      "detectar conversa parada",
+      "identificar objecao",
+      "preparar resposta sugerida",
+      "pedir dado faltante internamente",
+    ],
+    approvalRequiredFor: ["mensagem ao cliente", "promessa de resultado", "orientacao juridica final"],
+  },
+  {
+    id: "marketing-ops",
+    department: "marketing",
+    humanRole: "Social media/performance",
+    agentId: "jrc-marketing",
+    autonomyLevel: "assisted",
+    takeover: [
+      "diagnosticar campanha",
+      "criar briefing de criativo",
+      "gerar copy",
+      "enfileirar job de midia",
+    ],
+    approvalRequiredFor: ["publicacao", "criativo pago", "alteracao de campanha", "promessa publicitaria"],
+  },
+  {
+    id: "finance-ops",
+    department: "financeiro",
+    humanRole: "Assistente financeiro",
+    agentId: "jrc-financeiro",
+    autonomyLevel: "assisted",
+    takeover: [
+      "resumir recebiveis",
+      "detectar anomalias",
+      "preparar relatorio",
+      "sugerir cobranca interna",
+    ],
+    approvalRequiredFor: ["cobranca externa", "negociacao", "alterar contrato", "baixa financeira"],
+  },
+  {
+    id: "devops-ops",
+    department: "devops",
+    humanRole: "DevOps/infra interno",
+    agentId: "jrc-devops",
+    autonomyLevel: "safe_readonly",
+    takeover: [
+      "healthcheck",
+      "ler logs",
+      "mapear incidentes",
+      "preparar plano de correcao",
+    ],
+    approvalRequiredFor: ["deploy destrutivo", "apagar dados", "alterar producao", "rotacionar credenciais"],
+  },
+  {
+    id: "chief-of-staff",
+    department: "gestao",
+    humanRole: "Chefe de gabinete operacional",
+    agentId: "jrc-maestro",
+    autonomyLevel: "safe_internal",
+    takeover: [
+      "priorizar o dia",
+      "delegar tarefas",
+      "cobrar pendencias internas",
+      "fechar ata e resumo",
+    ],
+    approvalRequiredFor: ["mudar prioridade critica", "executar ato externo", "liberar excecao de safety"],
+  },
+];
+
+function getVirtualOfficeStatus() {
+  const tasks = listTasks(false);
+  const byDepartment = {};
+  const roles = VIRTUAL_OFFICE_ROLES.map((role) => {
+    const activeTasks = tasks.filter((task) => task.assignedAgentId === role.agentId && task.status !== "done");
+    const pendingApprovals = activeTasks.filter((task) => task.approval?.status === "pending").length;
+    byDepartment[role.department] = Number(byDepartment[role.department] || 0) + 1;
+    return {
+      ...role,
+      agentName: agentRegistry.get(role.agentId)?.name || role.agentId,
+      activeTasks: activeTasks.length,
+      pendingApprovals,
+      readyForAutonomy: ["safe_internal", "safe_readonly", "assisted"].includes(role.autonomyLevel),
+    };
+  });
+  const replaceableNow = roles.filter((role) => role.readyForAutonomy).length;
+  return {
+    target: "escritorio_100_virtual_com_aprovacao_humana_para_ato_externo",
+    replaceableNow,
+    totalRoles: roles.length,
+    coveragePct: Math.round((replaceableNow / Math.max(1, roles.length)) * 100),
+    byDepartment,
+    roles,
+    hardLocks: [
+      "Nada de protocolo/envio/publicacao/contato/cobranca sem aprovacao humana explicita.",
+      "Agentes podem preparar, revisar, classificar, resumir, auditar e enfileirar.",
+      "Toda substituicao humana vira fila, trace, budget e aprovacao quando sensivel.",
+    ],
+  };
+}
+
+function seedVirtualOfficeTasks() {
+  const created = [];
+  for (const role of VIRTUAL_OFFICE_ROLES) {
+    const sourceEventId = `virtual-office:${role.id}:${todayKey()}`;
+    if (hasTaskForSource(sourceEventId)) continue;
+    const needsHumanApproval = role.autonomyLevel === "review_required";
+    created.push(createOperationalTask({
+      title: `Escritorio virtual - assumir rotina: ${role.humanRole}`,
+      description: [
+        `Departamento: ${role.department}`,
+        `Agente responsavel: ${role.agentId}`,
+        `Funcoes que pode assumir:\n- ${role.takeover.join("\n- ")}`,
+        `Exige aprovacao para:\n- ${role.approvalRequiredFor.join("\n- ")}`,
+      ].join("\n\n"),
+      status: "todo",
+      source: "playbook",
+      sourceEventId,
+      assignedAgentId: role.agentId,
+      priority: role.department === "juridico" || role.department === "bpc" ? "high" : "normal",
+      domain: role.department,
+      needsHumanApproval,
+      approvalReason: needsHumanApproval
+        ? "Funcao juridica sensivel; resultado deve ir para revisao antes de uso final."
+        : "",
+      notes: [
+        "Seed de substituicao de trabalho humano interno. Ato externo permanece bloqueado.",
+      ],
+    }));
+  }
+  recordTrace({
+    kind: "virtualOffice.seed",
+    status: "ok",
+    agentId: "jrc-maestro",
+    domain: "gestao",
+    riskLevel: "medium",
+    message: `${created.length} rotina(s) de escritorio virtual criadas.`,
+  });
+  return { created, status: getVirtualOfficeStatus() };
+}
+
 function inferMeetingDomain(goal, explicitDomain) {
   const explicit = typeof explicitDomain === "string" ? explicitDomain.trim().toLowerCase() : "";
   if (explicit && DOMAIN_AGENT_MAP[explicit]) return explicit;
@@ -3330,6 +3555,7 @@ function buildEndOfDayReport() {
     risk: getRiskPanelStatus(),
     traces: summarizeTraces(5),
     media: getMediaOpsStatus(),
+    virtualOffice: getVirtualOfficeStatus(),
   };
   const lines = [
     `# Hermes Office - Relatorio operacional ${todayKey()}`,
@@ -3346,6 +3572,7 @@ function buildEndOfDayReport() {
     `- Risco operacional: ${ops.risk.level} (${ops.risk.flags.join("; ") || "sem alertas"})`,
     `- Midia configurada: ${ops.media.configuredCount}/${ops.media.total}`,
     `- Jobs de midia: ${ops.media.jobs.total} (${ops.media.jobs.pendingApproval} aprovacao/oes)`,
+    `- Escritorio virtual: ${ops.virtualOffice.replaceableNow}/${ops.virtualOffice.totalRoles} funcoes mapeadas (${ops.virtualOffice.coveragePct}%)`,
     "",
     "## Por area",
     ...ops.today.summary.map((item) => `- ${item.label}: ${item.value}`),
@@ -3369,6 +3596,9 @@ function buildEndOfDayReport() {
     ...ops.media.providers.map((provider) => `- ${provider.label}: ${provider.configured ? "configurado" : "faltando"} (${provider.kind})`),
     `- Preparacoes de midia hoje: ${ops.media.budget.preparedRuns}/${ops.media.budget.limits.preparedDaily}`,
     ...ops.media.jobs.latest.slice(0, 5).map((job) => `- Job ${job.id}: ${job.status} / ${job.kind} / ${job.providerId}`),
+    "",
+    "## Escritorio virtual",
+    ...ops.virtualOffice.roles.map((role) => `- ${role.humanRole}: ${role.agentName} / ${role.autonomyLevel} / ${role.activeTasks} tarefa(s)`),
     "",
     "## Safety",
     "- Auto-run global permanece conforme .env.",
@@ -3423,6 +3653,7 @@ async function getOperationsStatus() {
     risk: getRiskPanelStatus(engineUsage, hubStatus),
     traces: summarizeTraces(12),
     media: getMediaOpsStatus(),
+    virtualOffice: getVirtualOfficeStatus(),
     jrcHub: hubStatus,
     safety: {
       externalActionsLocked: true,

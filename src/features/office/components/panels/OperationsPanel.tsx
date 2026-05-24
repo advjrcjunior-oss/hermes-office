@@ -202,6 +202,27 @@ type OpsStatus = {
     recommendedDefault?: string;
     missing?: string[];
   };
+  virtualOffice?: {
+    target?: string;
+    replaceableNow?: number;
+    totalRoles?: number;
+    coveragePct?: number;
+    byDepartment?: Record<string, number>;
+    roles?: Array<{
+      id?: string;
+      department?: string;
+      humanRole?: string;
+      agentId?: string;
+      agentName?: string;
+      autonomyLevel?: string;
+      takeover?: string[];
+      approvalRequiredFor?: string[];
+      activeTasks?: number;
+      pendingApprovals?: number;
+      readyForAutonomy?: boolean;
+    }>;
+    hardLocks?: string[];
+  };
   jrcHub?: {
     ok?: boolean;
     readOnlyKeyConfigured?: boolean;
@@ -542,6 +563,22 @@ export function OperationsPanel({
     [client, runGatewayAction],
   );
 
+  const handleSeedVirtualOffice = useCallback(() => {
+    void runGatewayAction("virtualOfficeSeed", async () => {
+      if (status === "connected") return client.call("virtualOffice.seed", {});
+      return fetch("/api/office/ops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "virtualOffice.seed" }),
+      }).then(async (response) => {
+        const payload = (await response.json()) as OpsStatus & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Failed to seed virtual office.");
+        setSnapshot(payload);
+        return payload;
+      });
+    });
+  }, [client, runGatewayAction, status]);
+
   const currentMode = snapshot?.mode?.mode ?? "assisted";
   const currentCostMode = snapshot?.costMode?.mode ?? "balanced";
   const engineEntries = useMemo(
@@ -724,6 +761,69 @@ export function OperationsPanel({
                 <div className="mt-0.5 text-sm font-semibold text-white">{formatNumber(value)}</div>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section className="mt-3 rounded border border-sky-400/15 bg-sky-950/10 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-sky-100/75">
+              Escritorio virtual
+            </div>
+            <div className="font-mono text-[10px] text-sky-100/50">
+              {formatNumber(snapshot?.virtualOffice?.coveragePct)}%
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Funcoes</div>
+              <div className="mt-1 text-lg font-semibold">
+                {formatNumber(snapshot?.virtualOffice?.replaceableNow)}
+                <span className="text-xs font-normal text-white/35">
+                  {" "}/ {formatNumber(snapshot?.virtualOffice?.totalRoles)}
+                </span>
+              </div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Juridico</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.virtualOffice?.byDepartment?.juridico)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Ops</div>
+              <div className="mt-1 text-lg font-semibold">
+                {formatNumber((snapshot?.virtualOffice?.roles ?? []).reduce((sum, role) => sum + (role.activeTasks ?? 0), 0))}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSeedVirtualOffice}
+            disabled={actionBusy !== null}
+            className="mt-3 w-full rounded border border-sky-400/20 bg-sky-500/8 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-sky-50 transition hover:border-sky-300/45 disabled:opacity-45"
+          >
+            {actionBusy === "virtualOfficeSeed" ? "Criando rotinas" : "Assumir rotinas humanas"}
+          </button>
+          <div className="mt-3 space-y-2">
+            {(snapshot?.virtualOffice?.roles ?? []).slice(0, 8).map((role) => (
+              <div key={role.id ?? role.humanRole} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+                <div className="line-clamp-2 text-xs text-white/85">{role.humanRole}</div>
+                <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
+                  {role.department} / {role.agentName ?? role.agentId} / {role.autonomyLevel}
+                </div>
+                <div className="mt-1 text-[11px] leading-4 text-white/40">
+                  {formatNumber(role.activeTasks)} tarefa(s), {formatNumber(role.pendingApprovals)} aprovacao(oes)
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(role.takeover ?? []).slice(0, 3).map((item) => (
+                    <span key={item} className="rounded border border-sky-300/15 bg-black/20 px-2 py-1 text-[10px] text-sky-100/65">
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
+            A equipe virtual assume trabalho interno; atos externos continuam travados por aprovacao humana.
           </div>
         </section>
 
