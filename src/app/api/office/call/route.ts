@@ -37,11 +37,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // TODO: Create Claw3D voice and text skill.
     const scenario = buildMockPhoneCallScenario({
       callee,
       message: message || null,
-      voiceAvailable: Boolean(process.env.ELEVENLABS_API_KEY?.trim()),
+      voiceAvailable: Boolean(
+        process.env.QWEN3_TTS_ENDPOINT?.trim() ||
+          process.env.REPLICATE_API_TOKEN?.trim() ||
+          process.env.REPLICATE_API_KEY?.trim() ||
+          process.env.ELEVENLABS_API_KEY?.trim(),
+      ),
     });
 
     return NextResponse.json(

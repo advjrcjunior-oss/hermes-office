@@ -263,7 +263,8 @@ Common environment variables:
 - OpenClaw file defaults still come from `~/.openclaw/openclaw.json` when present.
 - `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH` override the default OpenClaw paths.
 - `OPENCLAW_GATEWAY_SSH_TARGET`, `OPENCLAW_GATEWAY_SSH_USER`, `OPENCLAW_GATEWAY_SSH_PORT`, and `OPENCLAW_GATEWAY_SSH_STRICT_HOST_KEY_CHECKING` support advanced gateway-host operations over SSH when needed.
-- `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, and `ELEVENLABS_MODEL_ID` enable voice reply integration.
+- `QWEN3_TTS_ENDPOINT` enables the default low-cost/local Qwen3-TTS voice path. If no local endpoint is available, `REPLICATE_API_TOKEN` or the legacy `REPLICATE_API_KEY` enables Replicate's `qwen/qwen3-tts` fallback.
+- `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, and `ELEVENLABS_MODEL_ID` remain available as premium voice fallback settings.
 
 See [`.env.example`](.env.example) for the full local development template.
 

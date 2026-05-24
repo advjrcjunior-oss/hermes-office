@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CURATED_ELEVENLABS_VOICES } from "@/lib/voiceReply/catalog";
+import { listAgentVoiceProfiles } from "@/lib/voiceReply/agentVoices";
 import type { StudioGatewayAdapterType } from "@/lib/studio/settings";
 
 type SettingsPanelProps = {
@@ -85,6 +86,7 @@ export function SettingsPanel({
   const isGatewayConnected = gatewayStatus === "connected";
   const gatewayDisconnectDisabled = !isGatewayConnected;
   const gatewayConnectDisabled = normalizedGatewayUrl.length === 0;
+  const agentVoices = listAgentVoiceProfiles();
   const tokenOptional =
     selectedAdapterType === "hermes" ||
     selectedAdapterType === "demo" ||
@@ -451,9 +453,9 @@ export function SettingsPanel({
         </span>
       </div>
       <div className="mt-3 rounded-lg border border-cyan-500/10 bg-black/20 px-4 py-3">
-        <div className="text-[11px] font-medium text-white">Voice</div>
+        <div className="text-[11px] font-medium text-white">Voice fallback</div>
         <div className="mt-1 text-[10px] text-white/75">
-          Choose the voice used for spoken agent replies.
+          Agent replies use Qwen3-TTS by default; these voices remain as premium fallback presets.
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
           {CURATED_ELEVENLABS_VOICES.map((voice) => {
@@ -478,6 +480,25 @@ export function SettingsPanel({
               </button>
             );
           })}
+        </div>
+      </div>
+      <div className="mt-3 rounded-lg border border-cyan-500/10 bg-black/20 px-4 py-3">
+        <div className="text-[11px] font-medium text-white">Agent voices</div>
+        <div className="mt-1 text-[10px] text-white/75">
+          Finalized replies are routed through cheap Qwen voices first.
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {agentVoices.slice(0, 10).map((profile) => (
+            <div
+              key={profile.agentId}
+              className="rounded-lg border border-cyan-500/10 bg-black/15 px-3 py-2"
+            >
+              <div className="text-[11px] font-medium text-white">{profile.agentId}</div>
+              <div className="mt-1 text-[10px] text-white/65">
+                {profile.label} · {profile.tone}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
       <div className="mt-3 rounded-lg border border-cyan-500/10 bg-black/20 px-4 py-3">

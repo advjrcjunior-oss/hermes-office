@@ -190,6 +190,7 @@ import {
   type VoiceSendPayload,
 } from "@/hooks/useVoiceRecorder";
 import { useVoiceReplyPlayback } from "@/hooks/useVoiceReplyPlayback";
+import { resolveAgentVoiceRequest } from "@/lib/voiceReply/agentVoices";
 import {
   buildOfficeAnimationState,
   clearOfficeAnimationTriggerHold,
@@ -1396,7 +1397,7 @@ export function OfficeScreen({
     stop: stopVoiceReplyPlayback,
   } = useVoiceReplyPlayback({
     enabled: voiceRepliesEnabled,
-    provider: voiceRepliesPreference.provider,
+    provider: "qwen3-tts",
     voiceId: voiceRepliesPreference.voiceId,
     speed: voiceRepliesPreference.speed,
   });
@@ -4188,12 +4189,19 @@ export function OfficeScreen({
     },
   });
 
-  useFinalizedAssistantReplyListener(state.agents, ({ text }) => {
+  useFinalizedAssistantReplyListener(state.agents, ({ agentId, text }) => {
     if (!voiceRepliesLoaded || !voiceRepliesEnabled) return;
+    const agentVoice = resolveAgentVoiceRequest(
+      agentId,
+      "qwen3-tts",
+      voiceRepliesPreference.voiceId,
+      voiceRepliesPreference.speed
+    );
     enqueueVoiceReply({
       text,
-      provider: voiceRepliesPreference.provider,
-      voiceId: voiceRepliesPreference.voiceId,
+      provider: "qwen3-tts",
+      voiceId: agentVoice.voiceId,
+      speed: agentVoice.speed,
     });
   });
 
@@ -4826,7 +4834,7 @@ export function OfficeScreen({
           onVoiceRepliesPreview={(voiceId, voiceName) => {
             void previewVoiceReply({
               text: `Hi, how can I help you? My name is ${voiceName}.`,
-              provider: voiceRepliesPreference.provider,
+              provider: "qwen3-tts",
               voiceId,
               speed: voiceRepliesSpeed,
             });

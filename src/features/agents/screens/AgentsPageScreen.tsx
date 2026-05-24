@@ -62,6 +62,7 @@ import { useGatewayConfigSyncController } from "@/features/agents/operations/use
 import { useFinalizedAssistantReplyListener } from "@/hooks/useFinalizedAssistantReplyListener";
 import { useStudioVoiceRepliesPreference } from "@/hooks/useStudioVoiceRepliesPreference";
 import { useVoiceReplyPlayback } from "@/hooks/useVoiceReplyPlayback";
+import { resolveAgentVoiceRequest } from "@/lib/voiceReply/agentVoices";
 import { isLocalGatewayUrl } from "@/lib/gateway/local-gateway";
 import type { ExecApprovalDecision, PendingExecApproval } from "@/features/agents/approvals/types";
 import {
@@ -255,7 +256,7 @@ const AgentsPageScreen = () => {
     stop: stopVoiceReplyPlayback,
   } = useVoiceReplyPlayback({
     enabled: voiceRepliesEnabled,
-    provider: voiceRepliesPreference.provider,
+    provider: "qwen3-tts",
     voiceId: voiceRepliesPreference.voiceId,
     speed: voiceRepliesSpeed,
   });
@@ -855,12 +856,19 @@ const AgentsPageScreen = () => {
       setMobilePane("chat");
     },
   });
-  useFinalizedAssistantReplyListener(state.agents, ({ text }) => {
+  useFinalizedAssistantReplyListener(state.agents, ({ agentId, text }) => {
     if (!voiceRepliesLoaded || !voiceRepliesEnabled) return;
+    const agentVoice = resolveAgentVoiceRequest(
+      agentId,
+      "qwen3-tts",
+      voiceRepliesPreference.voiceId,
+      voiceRepliesPreference.speed
+    );
     enqueueVoiceReply({
       text,
-      provider: voiceRepliesPreference.provider,
-      voiceId: voiceRepliesPreference.voiceId,
+      provider: "qwen3-tts",
+      voiceId: agentVoice.voiceId,
+      speed: agentVoice.speed,
     });
   });
   const handleChatSend = useCallback(

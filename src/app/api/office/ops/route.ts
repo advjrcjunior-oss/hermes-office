@@ -1072,7 +1072,13 @@ const buildMediaOpsStatus = () => {
       role: "voz local/barata para narracao e prototipos sem consumir plano cloud",
       defaultUse: "roteiro -> voz PT-BR/EN local quando modelo estiver instalado",
       approval: "required_for_voice_clone_or_publish",
-      configured: process.env.QWEN3_TTS_ENABLED === "1" || Boolean(process.env.QWEN3_TTS_MODEL_PATH?.trim()),
+      configured: Boolean(
+        process.env.QWEN3_TTS_ENDPOINT?.trim() ||
+          process.env.REPLICATE_API_TOKEN?.trim() ||
+          process.env.REPLICATE_API_KEY?.trim() ||
+          process.env.QWEN3_TTS_ENABLED === "1" ||
+          process.env.QWEN3_TTS_MODEL_PATH?.trim(),
+      ),
     },
     {
       id: "openai",
@@ -1096,7 +1102,7 @@ const buildMediaOpsStatus = () => {
       id: "replicate",
       label: "Replicate",
       kind: "image_video",
-      env: "REPLICATE_API_KEY",
+      env: "REPLICATE_API_TOKEN",
       role: "fallback para modelos de imagem/video",
       defaultUse: "experimentos controlados e fallback",
       approval: "required_for_paid_generation",

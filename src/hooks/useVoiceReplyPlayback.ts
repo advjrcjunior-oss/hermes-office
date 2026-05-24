@@ -20,7 +20,7 @@ export const useVoiceReplyPlayback = (params: {
   voiceId?: string | null;
   speed?: number;
 }) => {
-  const { enabled, provider = "elevenlabs", voiceId = null, speed = 1 } = params;
+  const { enabled, provider = "qwen3-tts", voiceId = null, speed = 1 } = params;
   const queueRef = useRef<VoiceReplyPlaybackRequest[]>([]);
   const processingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
