@@ -143,7 +143,16 @@ const synthesizeWithReplicateQwen3Tts = async (
   );
   if (!createResponse.ok) {
     const detail = (await createResponse.text().catch(() => "")).trim();
-    throw new Error(detail || "Replicate Qwen3-TTS prediction failed.");
+    try {
+      const parsed = JSON.parse(detail) as { title?: unknown; detail?: unknown; status?: unknown };
+      const title = typeof parsed.title === "string" ? parsed.title : "Replicate Qwen3-TTS prediction failed";
+      const message = typeof parsed.detail === "string" ? parsed.detail : "";
+      const status = typeof parsed.status === "number" ? `status ${parsed.status}` : "";
+      throw new Error([title, message, status].filter(Boolean).join(": "));
+    } catch (error) {
+      if (error instanceof Error && !error.message.startsWith("{")) throw error;
+      throw new Error(detail || "Replicate Qwen3-TTS prediction failed.");
+    }
   }
   let prediction = (await createResponse.json()) as {
     status?: string;

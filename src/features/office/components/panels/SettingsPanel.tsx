@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { CURATED_ELEVENLABS_VOICES } from "@/lib/voiceReply/catalog";
-import { listAgentVoiceProfiles } from "@/lib/voiceReply/agentVoices";
+import {
+  QWEN_VOICE_OPTIONS,
+  listAgentVoiceProfiles,
+} from "@/lib/voiceReply/agentVoices";
 import type { StudioGatewayAdapterType } from "@/lib/studio/settings";
 
 type SettingsPanelProps = {
@@ -455,14 +457,14 @@ export function SettingsPanel({
       <div className="mt-3 rounded-lg border border-cyan-500/10 bg-black/20 px-4 py-3">
         <div className="text-[11px] font-medium text-white">Voice fallback</div>
         <div className="mt-1 text-[10px] text-white/75">
-          Agent replies use Qwen3-TTS by default; these voices remain as premium fallback presets.
+          Agent replies use Qwen3-TTS by default; choose the low-cost fallback voice for unmapped agents.
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
-          {CURATED_ELEVENLABS_VOICES.map((voice) => {
+          {QWEN_VOICE_OPTIONS.map((voice) => {
             const selected = voice.id === voiceRepliesVoiceId;
             return (
               <button
-                key={voice.id ?? "default"}
+                key={voice.id}
                 type="button"
                 onClick={() => {
                   onVoiceRepliesVoiceChange(voice.id);

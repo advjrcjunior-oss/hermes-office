@@ -12,6 +12,23 @@ export type AgentVoiceRequest = {
   speed: number;
 };
 
+export type QwenVoiceOption = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+export const QWEN_VOICE_OPTIONS: QwenVoiceOption[] = [
+  { id: "neutral", label: "Qwen Neutral", description: "Equilibrada para respostas gerais." },
+  { id: "director", label: "Qwen Director", description: "Firme para coordenacao e decisoes." },
+  { id: "legal", label: "Qwen Legal", description: "Cautelosa para prazos e juridico." },
+  { id: "care", label: "Qwen Care", description: "Acolhedora para BPC e atendimento." },
+  { id: "auditor", label: "Qwen Auditor", description: "Pausada para revisao critica." },
+  { id: "creative", label: "Qwen Creative", description: "Dinamica para marketing." },
+  { id: "sales", label: "Qwen Sales", description: "Consultiva para comercial." },
+  { id: "ops", label: "Qwen Ops", description: "Objetiva para DevOps e execucao." },
+];
+
 const AGENT_VOICE_PROFILES: Record<string, AgentVoiceProfile> = {
   hermes: {
     agentId: "hermes",
