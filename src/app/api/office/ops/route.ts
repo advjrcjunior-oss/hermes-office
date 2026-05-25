@@ -892,6 +892,263 @@ const createAiRadarSeedTasks = () => {
   return created;
 };
 
+const AI_STACK_CONNECTORS = [
+  {
+    id: "litellm",
+    radarId: "litellm-gateway",
+    label: "LiteLLM",
+    layer: "model_gateway",
+    ownerAgentId: "jrc-devops",
+    activationMode: "local_proxy_with_budget",
+    env: ["JRC_LITELLM_BASE_URL", "LITELLM_MASTER_KEY"],
+    defaultEndpoint: "http://127.0.0.1:4000",
+    setupCommand: "litellm --config ~/.hermes/litellm-jrc.yaml --port 4000",
+    safetyLevel: "high",
+    nextStep: "Criar config LiteLLM com virtual keys por dominio e fallback Kimi/Ollama antes de Claude/Codex.",
+  },
+  {
+    id: "langfuse",
+    radarId: "langfuse-observability",
+    label: "Langfuse",
+    layer: "observability",
+    ownerAgentId: "jrc-auditor",
+    activationMode: "self_host_or_sanitized_cloud",
+    env: ["LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"],
+    defaultEndpoint: "http://127.0.0.1:3001",
+    setupCommand: "docker compose up -d langfuse",
+    safetyLevel: "high",
+    nextStep: "Ligar traces por taskId, agentId e domain com PII redaction antes de envio cloud.",
+  },
+  {
+    id: "playwright-mcp",
+    radarId: "playwright-mcp",
+    label: "Playwright MCP",
+    layer: "browser_tooling",
+    ownerAgentId: "jrc-devops",
+    activationMode: "mcp_allowlist_readonly_first",
+    env: ["JRC_BROWSER_ALLOWLIST"],
+    defaultEndpoint: "stdio:npx @playwright/mcp@latest",
+    setupCommand: "codex mcp add playwright npx \"@playwright/mcp@latest\"",
+    safetyLevel: "critical",
+    nextStep: "Criar allowlist JRC Hub/localhost e negar botoes de envio, protocolo, cobranca e publicacao.",
+  },
+  {
+    id: "guardrails",
+    radarId: "nemo-guardrails",
+    label: "NeMo/Guardrails",
+    layer: "safety",
+    ownerAgentId: "jrc-auditor",
+    activationMode: "policy_engine_required_before_tools",
+    env: ["JRC_GUARDRAILS_CONFIG_DIR", "NEMO_GUARDRAILS_SERVER_URL"],
+    defaultEndpoint: "local policy files",
+    setupCommand: "nemoguardrails server --config ~/.hermes/guardrails/jrc",
+    safetyLevel: "critical",
+    nextStep: "Formalizar rails para PII, prompt injection, tool calls e atos externos.",
+  },
+  {
+    id: "pipecat",
+    radarId: "pipecat-voice-agents",
+    label: "Pipecat",
+    layer: "voice_multimodal",
+    ownerAgentId: "jrc-amy",
+    activationMode: "internal_voice_room",
+    env: ["PIPECAT_BASE_URL", "QWEN3_TTS_ENDPOINT"],
+    defaultEndpoint: "http://127.0.0.1:7860",
+    setupCommand: "pipecat init jrc-voice-office",
+    safetyLevel: "medium",
+    nextStep: "Prototipar sala T0 falada usando Whisper local e Qwen3-TTS.",
+  },
+  {
+    id: "firecrawl-crawl4ai",
+    radarId: "firecrawl-crawl4ai-second-brain",
+    label: "Firecrawl/Crawl4AI",
+    layer: "research_ingest",
+    ownerAgentId: "jrc-pesquisador",
+    activationMode: "allowlisted_ingest",
+    env: ["FIRECRAWL_API_KEY", "CRAWL4AI_BASE_URL"],
+    defaultEndpoint: "http://127.0.0.1:11235",
+    setupCommand: "crawl4ai-server --host 127.0.0.1 --port 11235",
+    safetyLevel: "medium",
+    nextStep: "Criar crawler de repos/noticias com snapshot Obsidian e score Second Brain.",
+  },
+  {
+    id: "memory",
+    radarId: "mem0-zep-long-memory",
+    label: "Mem0/Zep",
+    layer: "memory",
+    ownerAgentId: "jrc-maestro",
+    activationMode: "local_memory_index",
+    env: ["MEM0_API_KEY", "MEM0_BASE_URL", "ZEP_API_URL", "ZEP_API_KEY"],
+    defaultEndpoint: "local/self-host",
+    setupCommand: "docker compose up -d zep",
+    safetyLevel: "high",
+    nextStep: "Definir memoria por agente com fonte Obsidian e TTL para lembrancas fracas.",
+  },
+  {
+    id: "openadapt",
+    radarId: "openadapt-rpa",
+    label: "OpenAdapt",
+    layer: "desktop_rpa",
+    ownerAgentId: "jrc-devops",
+    activationMode: "recorded_demo_sandbox",
+    env: ["OPENADAPT_HOME"],
+    defaultEndpoint: "~/.openadapt",
+    setupCommand: "pip install 'openadapt[privacy,evals]'",
+    safetyLevel: "critical",
+    nextStep: "Testar somente em rotina interna nao sensivel com PII scrub ativo.",
+  },
+  {
+    id: "agent-browser-protocol",
+    radarId: "agent-browser-protocol",
+    label: "Agent Browser Protocol",
+    layer: "browser_automation",
+    ownerAgentId: "jrc-devops",
+    activationMode: "readonly_benchmark",
+    env: ["ABP_BASE_URL"],
+    defaultEndpoint: "http://127.0.0.1:8222",
+    setupCommand: "npx -y agent-browser-protocol --mcp",
+    safetyLevel: "high",
+    nextStep: "Comparar contra Playwright MCP em fluxo read-only do JRC Hub.",
+  },
+  {
+    id: "mova",
+    radarId: "mova-video-audio",
+    label: "MOVA",
+    layer: "media",
+    ownerAgentId: "jrc-marketing",
+    activationMode: "media_ops_watchlist",
+    env: ["MOVA_API_KEY", "MOVA_BASE_URL"],
+    defaultEndpoint: "provider/API when available",
+    setupCommand: "Criar job Media Ops de avaliacao; sem render automatico.",
+    safetyLevel: "medium",
+    nextStep: "Monitorar API/ComfyUI e comparar custo com Veo/Kling/Sora.",
+  },
+  {
+    id: "a2a",
+    radarId: "a2a-protocol",
+    label: "A2A",
+    layer: "agent_protocol",
+    ownerAgentId: "jrc-maestro",
+    activationMode: "internal_adapter_only",
+    env: ["JRC_A2A_BASE_URL", "JRC_A2A_TOKEN"],
+    defaultEndpoint: "http://127.0.0.1:8899",
+    setupCommand: "Criar adapter interno Hermes<->OpenClaw; nao expor publico.",
+    safetyLevel: "high",
+    nextStep: "Padronizar envelope de tarefa, handoff, status e aprovacao.",
+  },
+  {
+    id: "mcp-registry",
+    radarId: "mcp-registry-allowlist",
+    label: "MCP Registry Allowlist",
+    layer: "tool_registry",
+    ownerAgentId: "jrc-auditor",
+    activationMode: "curated_allowlist_only",
+    env: ["JRC_MCP_ALLOWLIST_PATH"],
+    defaultEndpoint: "~/.hermes/mcp-allowlist.json",
+    setupCommand: "Criar allowlist assinada; negar stdio/shell amplo por padrao.",
+    safetyLevel: "critical",
+    nextStep: "Auditar servidores MCP antes de habilitar para agentes JRC.",
+  },
+];
+
+const isConnectorConfigured = (connector: { env: string[] }) =>
+  connector.env.some((name) => Boolean(process.env[name]?.trim()));
+
+const loadAiStack = () => {
+  const radar = loadAiRadar();
+  const radarById = new Map(radar.latest.map((item) => [item.id, item]));
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks)
+    ? parsed.tasks.filter((task): task is JsonRecord => Boolean(task && typeof task === "object" && !(task as JsonRecord).archived))
+    : [];
+  const latest = AI_STACK_CONNECTORS.map((connector) => {
+    const stackTasks = tasks.filter((task) => String(task.sourceEventId || "").startsWith(`ai-stack:${connector.id}:`));
+    const configured = isConnectorConfigured(connector);
+    return {
+      ...connector,
+      configured,
+      missingEnv: connector.env.filter((name) => !process.env[name]?.trim()),
+      radarStatus: radarById.get(connector.radarId)?.status || "unknown",
+      activeTasks: stackTasks.filter((task) => task.status !== "done").length,
+      pendingApprovals: stackTasks.filter((task) => {
+        const approval = task.approval && typeof task.approval === "object" && !Array.isArray(task.approval)
+          ? (task.approval as JsonRecord)
+          : null;
+        return approval?.status === "pending";
+      }).length,
+      readyForDryRun: configured || ["playwright-mcp", "mcp-registry"].includes(connector.id),
+    };
+  });
+  return {
+    total: latest.length,
+    configured: latest.filter((connector) => connector.configured).length,
+    readyForDryRun: latest.filter((connector) => connector.readyForDryRun).length,
+    critical: latest.filter((connector) => connector.safetyLevel === "critical").length,
+    latest,
+    policy: {
+      defaultMode: "prepared_not_activated",
+      externalActivationRequiresApproval: true,
+      paidCallsRequireApproval: true,
+      authenticatedSystemsRequireApproval: true,
+      mcpRequiresAllowlist: true,
+    },
+  };
+};
+
+const createAiStackSeedTasks = () => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+  const now = new Date().toISOString();
+  const created = [];
+  for (const connector of AI_STACK_CONNECTORS) {
+    const specs = [
+      { suffix: "configure", agentId: connector.ownerAgentId, approval: false, priority: connector.safetyLevel === "critical" ? "high" : "normal" },
+      { suffix: "verify", agentId: connector.ownerAgentId, approval: false, priority: "normal" },
+      { suffix: "safety", agentId: "jrc-auditor", approval: true, priority: connector.safetyLevel === "critical" ? "high" : "normal" },
+    ];
+    for (const spec of specs) {
+      const sourceEventId = `ai-stack:${connector.id}:${spec.suffix}`;
+      if (hasTaskForSource(tasks, sourceEventId)) continue;
+      const task = {
+        id: `jrc-task-${Math.random().toString(16).slice(2, 14)}`,
+        title: `AI Stack - ${spec.suffix}: ${connector.label}`,
+        description: [
+          `Camada: ${connector.layer}`,
+          `Modo de ativacao: ${connector.activationMode}`,
+          `Endpoint padrao: ${connector.defaultEndpoint}`,
+          `Env esperadas:\n- ${connector.env.join("\n- ")}`,
+          `Comando/plano seguro:\n${connector.setupCommand}`,
+          `Proximo passo: ${connector.nextStep}`,
+          "Regra: preparar e validar; nao ativar acesso externo, API paga, MCP amplo ou sistema autenticado sem aprovacao humana.",
+        ].join("\n\n"),
+        status: "todo",
+        source: "playbook",
+        sourceEventId,
+        assignedAgentId: spec.agentId,
+        createdAt: now,
+        updatedAt: now,
+        updatedAtMs: Date.now(),
+        lastActivityAt: now,
+        priority: spec.priority,
+        domain: connector.layer,
+        notes: ["Criado pelo AI Stack Hub. Nenhuma instalacao, chamada externa ou gasto foi executado."],
+        archived: false,
+        approval: {
+          required: spec.approval,
+          status: spec.approval ? "pending" : "not_required",
+          reason: spec.approval ? "Conector pode ampliar ferramenta, custo, PII ou automacao; exige revisao humana." : "",
+          resolvedAt: null,
+          resolvedBy: null,
+        },
+      };
+      tasks.unshift(task);
+      created.push(task);
+    }
+  }
+  writeJsonFile(TASKS_FILE, { version: 1, tasks });
+  return created;
+};
+
 const buildVirtualOfficeStatus = () => {
   const parsed = readJsonFile(TASKS_FILE);
   const tasks = Array.isArray(parsed?.tasks)
@@ -1440,6 +1697,7 @@ const buildOpsStatus = async () => {
     secondBrain: loadSecondBrain(),
     strategicPilots: loadStrategicPilots(),
     aiRadar: loadAiRadar(),
+    aiStack: loadAiStack(),
     jrcHub: buildJrcHubStatus(),
     safety: {
       externalActionsLocked: true,
@@ -1473,8 +1731,14 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as JsonRecord & { action?: unknown; mode?: unknown };
     const action = typeof body.action === "string" ? body.action : "mode.set";
-    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed" && action !== "secondBrain.ingest" && action !== "secondBrain.seedRecent" && action !== "strategicPilots.seedTop4" && action !== "aiRadar.seed") {
+    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed" && action !== "secondBrain.ingest" && action !== "secondBrain.seedRecent" && action !== "strategicPilots.seedTop4" && action !== "aiRadar.seed" && action !== "aiStack.seed") {
       return NextResponse.json({ error: "Fallback HTTP only supports safe local Ops actions. Connect gateway for execution actions." }, { status: 400 });
+    }
+    if (action === "aiStack.seed") {
+      createAiStackSeedTasks();
+      return NextResponse.json(await buildOpsStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     if (action === "aiRadar.seed") {
       createAiRadarSeedTasks();

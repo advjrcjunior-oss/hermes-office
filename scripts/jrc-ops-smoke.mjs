@@ -33,6 +33,8 @@ if (typeof payload?.strategicPilots?.total !== "number") failures.push("missing 
 if (!Array.isArray(payload?.strategicPilots?.latest)) failures.push("missing strategic pilots latest");
 if (typeof payload?.aiRadar?.total !== "number") failures.push("missing AI radar total");
 if (!Array.isArray(payload?.aiRadar?.latest)) failures.push("missing AI radar latest");
+if (typeof payload?.aiStack?.total !== "number") failures.push("missing AI stack total");
+if (!Array.isArray(payload?.aiStack?.latest)) failures.push("missing AI stack latest");
 if (!payload?.safety?.externalActionsLocked) failures.push("safety lock is not enabled");
 
 if (failures.length > 0) {
@@ -63,6 +65,8 @@ console.log(
       strategicPilotsReady: payload.strategicPilots.readyNow,
       aiRadar: payload.aiRadar.total,
       aiRadarReady: payload.aiRadar.readyNow,
+      aiStack: payload.aiStack.total,
+      aiStackConfigured: payload.aiStack.configured,
       todayReady: payload.today.workflow?.ready ?? 0,
       autoRunEnabled: payload.budget.limits.autoRunEnabled,
       externalActionsLocked: payload.safety.externalActionsLocked,

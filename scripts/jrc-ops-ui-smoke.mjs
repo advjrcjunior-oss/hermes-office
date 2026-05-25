@@ -53,6 +53,8 @@ if (!/pilotos top 4/i.test(text)) failures.push("missing strategic pilots");
 if (!/ativar top 4/i.test(text)) failures.push("missing strategic pilots action");
 if (!/ai radar/i.test(text)) failures.push("missing AI radar");
 if (!/semear radar/i.test(text)) failures.push("missing AI radar seed action");
+if (!/ai stack hub/i.test(text)) failures.push("missing AI stack hub");
+if (!/preparar stack/i.test(text)) failures.push("missing AI stack seed action");
   if (maxUpdateErrors.length > 0) failures.push("React maximum update loop");
   if (errors.length > maxUpdateErrors.length) failures.push("console errors");
 
@@ -86,6 +88,7 @@ if (!/semear radar/i.test(text)) failures.push("missing AI radar seed action");
         hasSecondBrain: true,
         hasStrategicPilots: true,
         hasAiRadar: true,
+        hasAiStack: true,
         maxUpdateErrors: 0,
         consoleErrors: 0,
       },

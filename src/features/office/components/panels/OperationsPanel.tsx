@@ -288,6 +288,37 @@ type OpsStatus = {
       readyNow?: boolean;
     }>;
   };
+  aiStack?: {
+    total?: number;
+    configured?: number;
+    readyForDryRun?: number;
+    critical?: number;
+    policy?: {
+      defaultMode?: string;
+      externalActivationRequiresApproval?: boolean;
+      paidCallsRequireApproval?: boolean;
+      authenticatedSystemsRequireApproval?: boolean;
+      mcpRequiresAllowlist?: boolean;
+    };
+    latest?: Array<{
+      id?: string;
+      label?: string;
+      layer?: string;
+      ownerAgentId?: string;
+      activationMode?: string;
+      env?: string[];
+      missingEnv?: string[];
+      defaultEndpoint?: string;
+      setupCommand?: string;
+      safetyLevel?: string;
+      nextStep?: string;
+      configured?: boolean;
+      radarStatus?: string;
+      activeTasks?: number;
+      pendingApprovals?: number;
+      readyForDryRun?: boolean;
+    }>;
+  };
   jrcHub?: {
     ok?: boolean;
     readOnlyKeyConfigured?: boolean;
@@ -726,6 +757,22 @@ export function OperationsPanel({
       }).then(async (response) => {
         const payload = (await response.json()) as OpsStatus & { error?: string };
         if (!response.ok) throw new Error(payload.error || "Failed to seed AI radar.");
+        setSnapshot(payload);
+        return payload;
+      });
+    });
+  }, [client, runGatewayAction, status]);
+
+  const handleSeedAiStack = useCallback(() => {
+    void runGatewayAction("aiStackSeed", async () => {
+      if (status === "connected") return client.call("aiStack.seed", {});
+      return fetch("/api/office/ops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "aiStack.seed" }),
+      }).then(async (response) => {
+        const payload = (await response.json()) as OpsStatus & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Failed to seed AI stack.");
         setSnapshot(payload);
         return payload;
       });
@@ -1181,6 +1228,67 @@ export function OperationsPanel({
           </div>
           <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
             Radar so cria tarefas internas. Instalar ferramenta, ligar MCP amplo, chamar API paga ou acessar sistema autenticado continua exigindo aprovacao humana.
+          </div>
+        </section>
+
+        <section className="mt-3 rounded border border-white/10 bg-white/[0.03] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-indigo-100/75">
+              AI Stack Hub
+            </div>
+            <div className="font-mono text-[10px] text-indigo-100/50">
+              {formatNumber(snapshot?.aiStack?.configured)} / {formatNumber(snapshot?.aiStack?.total)}
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Configurado</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.aiStack?.configured)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Dry-run</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.aiStack?.readyForDryRun)}</div>
+            </div>
+            <div className="rounded border border-amber-300/15 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-amber-100/45">Criticos</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.aiStack?.critical)}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSeedAiStack}
+            disabled={actionBusy !== null}
+            className="mt-3 w-full rounded border border-indigo-400/25 bg-indigo-500/10 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-indigo-50 transition hover:border-indigo-300/45 disabled:opacity-45"
+          >
+            {actionBusy === "aiStackSeed" ? "Preparando" : "Preparar stack"}
+          </button>
+          <div className="mt-3 space-y-2">
+            {(snapshot?.aiStack?.latest ?? []).slice(0, 6).map((connector) => (
+              <div key={connector.id ?? connector.label} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="line-clamp-1 text-xs text-white/85">{connector.label}</div>
+                    <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
+                      {connector.layer} / {connector.activationMode}
+                    </div>
+                  </div>
+                  <span className={connector.configured ? "font-mono text-[10px] text-emerald-200" : "font-mono text-[10px] text-amber-200"}>
+                    {connector.configured ? "ok" : "env"}
+                  </span>
+                </div>
+                <div className="mt-2 line-clamp-2 text-[11px] leading-4 text-white/45">{connector.nextStep}</div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(connector.missingEnv ?? []).slice(0, 3).map((envName) => (
+                    <span key={envName} className="rounded border border-indigo-300/15 bg-black/20 px-2 py-1 font-mono text-[9px] text-indigo-100/65">
+                      {envName}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
+            Stack fica preparado, nao ativado. API paga, MCP amplo, browser autenticado e sistemas externos continuam bloqueados ate aprovacao humana.
           </div>
         </section>
 
