@@ -264,6 +264,30 @@ type OpsStatus = {
       readyNow?: boolean;
     }>;
   };
+  aiRadar?: {
+    total?: number;
+    readyNow?: number;
+    byStatus?: Record<string, number>;
+    byCategory?: Record<string, number>;
+    hardLocks?: string[];
+    latest?: Array<{
+      id?: string;
+      rank?: number;
+      title?: string;
+      category?: string;
+      ownerAgentId?: string;
+      status?: string;
+      impact?: string;
+      fit?: string;
+      repos?: string[];
+      systems?: string[];
+      nextActions?: string[];
+      hardLocks?: string[];
+      activeTasks?: number;
+      pendingApprovals?: number;
+      readyNow?: boolean;
+    }>;
+  };
   jrcHub?: {
     ok?: boolean;
     readOnlyKeyConfigured?: boolean;
@@ -692,6 +716,22 @@ export function OperationsPanel({
     });
   }, [client, runGatewayAction, status]);
 
+  const handleSeedAiRadar = useCallback(() => {
+    void runGatewayAction("aiRadarSeed", async () => {
+      if (status === "connected") return client.call("aiRadar.seed", {});
+      return fetch("/api/office/ops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "aiRadar.seed" }),
+      }).then(async (response) => {
+        const payload = (await response.json()) as OpsStatus & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Failed to seed AI radar.");
+        setSnapshot(payload);
+        return payload;
+      });
+    });
+  }, [client, runGatewayAction, status]);
+
   const currentMode = snapshot?.mode?.mode ?? "assisted";
   const currentCostMode = snapshot?.costMode?.mode ?? "balanced";
   const engineEntries = useMemo(
@@ -1078,6 +1118,69 @@ export function OperationsPanel({
           </div>
           <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
             NotebookLM, Agent OS, Gemini Omni e Qwen3-TTS entram como pilotos controlados; custo, dados e publicacao ficam travados.
+          </div>
+        </section>
+
+        <section className="mt-3 rounded border border-white/10 bg-white/[0.03] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-100/75">
+              AI Radar
+            </div>
+            <div className="font-mono text-[10px] text-cyan-100/50">
+              {formatNumber(snapshot?.aiRadar?.readyNow)} / {formatNumber(snapshot?.aiRadar?.total)}
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Agora</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.aiRadar?.byStatus?.adopt_now)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-white/40">Pilotos</div>
+              <div className="mt-1 text-lg font-semibold">{formatNumber(snapshot?.aiRadar?.byStatus?.pilot)}</div>
+            </div>
+            <div className="rounded border border-amber-300/15 bg-black/20 px-2 py-2">
+              <div className="font-mono text-[9px] uppercase text-amber-100/45">OK?</div>
+              <div className="mt-1 text-lg font-semibold">
+                {formatNumber((snapshot?.aiRadar?.latest ?? []).reduce((sum, item) => sum + Number(item.pendingApprovals ?? 0), 0))}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSeedAiRadar}
+            disabled={actionBusy !== null}
+            className="mt-3 w-full rounded border border-cyan-400/25 bg-cyan-500/10 px-2 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-50 transition hover:border-cyan-300/45 disabled:opacity-45"
+          >
+            {actionBusy === "aiRadarSeed" ? "Criando" : "Semear radar"}
+          </button>
+          <div className="mt-3 space-y-2">
+            {(snapshot?.aiRadar?.latest ?? []).slice(0, 6).map((item) => (
+              <div key={item.id ?? item.title} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+                <div className="flex items-start gap-2">
+                  <div className="rounded border border-cyan-300/20 bg-cyan-500/10 px-2 py-1 font-mono text-[10px] text-cyan-100">
+                    #{formatNumber(item.rank)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-xs text-white/85">{item.title}</div>
+                    <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
+                      {item.category} / {item.status} / {item.ownerAgentId}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2 line-clamp-2 text-[11px] leading-4 text-white/45">{item.impact}</div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(item.nextActions ?? []).slice(0, 2).map((action) => (
+                    <span key={action} className="rounded border border-cyan-300/15 bg-black/20 px-2 py-1 text-[10px] text-cyan-100/65">
+                      {action}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded border border-amber-300/15 bg-amber-500/8 px-2 py-2 text-[11px] leading-4 text-amber-100/75">
+            Radar so cria tarefas internas. Instalar ferramenta, ligar MCP amplo, chamar API paga ou acessar sistema autenticado continua exigindo aprovacao humana.
           </div>
         </section>
 

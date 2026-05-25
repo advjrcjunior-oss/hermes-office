@@ -31,6 +31,8 @@ if (typeof payload?.secondBrain?.total !== "number") failures.push("missing seco
 if (!Array.isArray(payload?.secondBrain?.latest)) failures.push("missing second brain latest");
 if (typeof payload?.strategicPilots?.total !== "number") failures.push("missing strategic pilots total");
 if (!Array.isArray(payload?.strategicPilots?.latest)) failures.push("missing strategic pilots latest");
+if (typeof payload?.aiRadar?.total !== "number") failures.push("missing AI radar total");
+if (!Array.isArray(payload?.aiRadar?.latest)) failures.push("missing AI radar latest");
 if (!payload?.safety?.externalActionsLocked) failures.push("safety lock is not enabled");
 
 if (failures.length > 0) {
@@ -59,6 +61,8 @@ console.log(
       secondBrainInsights: payload.secondBrain.total,
       strategicPilots: payload.strategicPilots.total,
       strategicPilotsReady: payload.strategicPilots.readyNow,
+      aiRadar: payload.aiRadar.total,
+      aiRadarReady: payload.aiRadar.readyNow,
       todayReady: payload.today.workflow?.ready ?? 0,
       autoRunEnabled: payload.budget.limits.autoRunEnabled,
       externalActionsLocked: payload.safety.externalActionsLocked,

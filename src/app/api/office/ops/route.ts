@@ -630,6 +630,268 @@ const STRATEGIC_PILOTS = [
   },
 ];
 
+const AI_TECH_RADAR = [
+  {
+    id: "litellm-gateway",
+    rank: 1,
+    title: "LiteLLM gateway de custo e fallback",
+    category: "model_gateway",
+    ownerAgentId: "jrc-devops",
+    status: "adopt_now",
+    impact: "Corta risco de consumo invisivel ao centralizar modelos, limites, logs, fallback e chaves virtuais.",
+    fit: "Hermes shim pode continuar existindo, mas LiteLLM vira camada padrao para custo e roteamento multi-modelo.",
+    repos: ["https://github.com/BerriAI/litellm"],
+    systems: ["Kimi", "Claude", "Codex/OpenAI", "Gemini", "DeepSeek", "Qwen", "Ollama"],
+    nextActions: ["Subir proxy local em modo dry-run.", "Mapear modelos por dominio.", "Bloquear gasto sem budget por virtual key."],
+    hardLocks: ["Nao migrar trafego juridico sensivel sem teste.", "Nao registrar secrets em log."],
+  },
+  {
+    id: "langfuse-observability",
+    rank: 2,
+    title: "Langfuse observabilidade e evals",
+    category: "observability",
+    ownerAgentId: "jrc-auditor",
+    status: "adopt_now",
+    impact: "Mostra quem chamou qual modelo, custo, prompt, resposta, erro, latencia e qualidade.",
+    fit: "Transforma a equipe virtual em operacao auditavel com score por agente e por rotina.",
+    repos: ["https://github.com/langfuse/langfuse"],
+    systems: ["Hermes Office", "JRC Hub", "LiteLLM"],
+    nextActions: ["Adicionar tracing por taskId.", "Criar score semanal por agente.", "Ligar dashboard de custo por dominio."],
+    hardLocks: ["Sanitizar PII antes de trace cloud.", "Preferir self-host para dados juridicos."],
+  },
+  {
+    id: "playwright-mcp",
+    rank: 3,
+    title: "Playwright MCP para sistemas web",
+    category: "tooling",
+    ownerAgentId: "jrc-devops",
+    status: "adopt_now",
+    impact: "Permite agentes navegarem, testarem e extrairem dados de sistemas internos com ferramenta padronizada.",
+    fit: "Bom para JRC Hub, paineis, conferencias e testes UI. Mais controlavel que browser agents soltos.",
+    repos: ["https://github.com/microsoft/playwright-mcp"],
+    systems: ["Codex", "Claude Code", "Hermes Office"],
+    nextActions: ["Criar allowlist de dominios.", "Separar browser read-only de browser executor.", "Logar screenshot e passo."],
+    hardLocks: ["Sem clicar Enviar/Protocolar/Cobrar.", "Sem cookies/sessao em log."],
+  },
+  {
+    id: "nemo-guardrails",
+    rank: 4,
+    title: "NeMo Guardrails para hard locks",
+    category: "safety",
+    ownerAgentId: "jrc-auditor",
+    status: "adopt_now",
+    impact: "Cria rails programaveis de entrada, saida e tool calls para impedir bypass por prompt.",
+    fit: "Camada obrigatoria antes de liberar MCP amplo ou automacao web em LegalMail/JRC Hub.",
+    repos: ["https://github.com/NVIDIA-NeMo/Guardrails", "https://github.com/guardrails-ai/guardrails"],
+    systems: ["LegalMail", "BPC", "JRC Hub", "MCP"],
+    nextActions: ["Formalizar rails de ato externo.", "Criar filtro PII local.", "Adicionar teste de prompt injection."],
+    hardLocks: ["Sem rail, sem ferramenta sensivel.", "Aprovacao humana vence qualquer agente."],
+  },
+  {
+    id: "pipecat-voice-agents",
+    rank: 5,
+    title: "Pipecat para agentes por voz",
+    category: "voice_multimodal",
+    ownerAgentId: "jrc-amy",
+    status: "pilot",
+    impact: "Permite conversar com agentes por audio em tempo real, com STT/TTS e subagentes.",
+    fit: "Pode virar recepcao interna, reuniao T0 falada, sala Claw3D com vozes e atendimento assistido.",
+    repos: ["https://github.com/pipecat-ai/pipecat"],
+    systems: ["Qwen3-TTS", "Whisper local", "Gemini Live", "OpenAI Realtime"],
+    nextActions: ["Prototipar sala T0 por WebSocket.", "Usar Qwen/Whisper local primeiro.", "Medir latencia e custo."],
+    hardLocks: ["Sem atendimento externo automatico.", "Sem gravar audio sensivel sem consentimento."],
+  },
+  {
+    id: "firecrawl-crawl4ai-second-brain",
+    rank: 6,
+    title: "Firecrawl/Crawl4AI para Second Brain",
+    category: "research_ingest",
+    ownerAgentId: "jrc-pesquisador",
+    status: "adopt_now",
+    impact: "Transforma paginas, repos e noticias em markdown limpo para triagem e tarefas.",
+    fit: "Alimenta Obsidian e Hermes com pesquisa recorrente sem copiar manualmente links.",
+    repos: ["https://github.com/firecrawl/firecrawl", "https://github.com/unclecode/crawl4ai"],
+    systems: ["Obsidian", "Second Brain", "Marketing", "Juridico"],
+    nextActions: ["Criar crawler com allowlist.", "Salvar snapshot no Obsidian.", "Gerar tarefas com score e fonte."],
+    hardLocks: ["Respeitar robots/termos.", "Nao capturar portal autenticado sem aprovacao."],
+  },
+  {
+    id: "mem0-zep-long-memory",
+    rank: 7,
+    title: "Mem0/Zep para memoria longa",
+    category: "memory",
+    ownerAgentId: "jrc-maestro",
+    status: "pilot",
+    impact: "Da memoria operacional aos agentes sem depender de contexto gigante a cada conversa.",
+    fit: "Obsidian segue fonte de verdade; memoria vira indice/lembranca operacional por agente.",
+    repos: ["https://github.com/mem0ai/mem0", "https://github.com/getzep/zep"],
+    systems: ["Obsidian", "Hermes Office", "Agentes JRC"],
+    nextActions: ["Definir esquema de memoria por cliente/caso/agente.", "Criar TTL para lembrancas fracas.", "Testar recall auditavel."],
+    hardLocks: ["PII juridica so local/self-host.", "Memoria deve citar fonte."],
+  },
+  {
+    id: "openadapt-rpa",
+    rank: 8,
+    title: "OpenAdapt para RPA por demonstracao",
+    category: "desktop_rpa",
+    ownerAgentId: "jrc-devops",
+    status: "watch",
+    impact: "Grava demonstracoes humanas e transforma em automacao de GUI desktop/web.",
+    fit: "Interessante para rotinas repetitivas que hoje alguem faz olhando tela, mas exige governanca forte.",
+    repos: ["https://github.com/OpenAdaptAI/OpenAdapt"],
+    systems: ["JRC Hub", "LegalMail", "rotinas administrativas"],
+    nextActions: ["Mapear uma rotina interna nao sensivel.", "Testar captura com PII scrub.", "Comparar contra Playwright MCP."],
+    hardLocks: ["Nao usar em protocolo real sem aprovacao.", "Nao gravar tela com dados sensiveis sem mascara."],
+  },
+  {
+    id: "agent-browser-protocol",
+    rank: 9,
+    title: "Agent Browser Protocol",
+    category: "browser_automation",
+    ownerAgentId: "jrc-devops",
+    status: "watch",
+    impact: "Browser deterministico com MCP/REST, prometendo menos tokens e execucao mais estavel.",
+    fit: "Pode substituir parte do Playwright MCP se provar mais previsivel em fluxos longos.",
+    repos: ["https://github.com/theredsix/agent-browser-protocol"],
+    systems: ["Codex", "Claude Code", "Hermes Office"],
+    nextActions: ["Rodar benchmark local contra Playwright MCP.", "Testar fluxo JRC Hub read-only.", "Avaliar maturidade/licenca."],
+    hardLocks: ["Somente read-only no piloto.", "Sem credenciais fora do cofre local."],
+  },
+  {
+    id: "mova-video-audio",
+    rank: 10,
+    title: "MOVA video+audio open-source",
+    category: "media",
+    ownerAgentId: "jrc-marketing",
+    status: "watch",
+    impact: "Gera video e audio sincronizados, possivel alternativa open-source para criativos futuros.",
+    fit: "Pode reduzir custo de video educativo se API/local amadurecer.",
+    repos: ["https://github.com/OpenMOSS/MOVA"],
+    systems: ["Media Ops", "Marketing JRC", "Qwen voice"],
+    nextActions: ["Monitorar API e ComfyUI.", "Criar job Media Ops watchlist.", "Comparar contra Veo/Kling/Sora quando houver custo."],
+    hardLocks: ["Sem publicacao sem aprovacao OAB.", "Sem deepfake/clone nao autorizado."],
+  },
+  {
+    id: "a2a-protocol",
+    rank: 11,
+    title: "A2A para comunicacao entre agentes",
+    category: "agent_protocol",
+    ownerAgentId: "jrc-maestro",
+    status: "watch",
+    impact: "Padroniza delegacao entre agentes/sistemas diferentes sem acoplamento direto.",
+    fit: "Util para Hermes, OpenClaw, n8n, Maestri e futuros workers se precisarem conversar entre si.",
+    repos: ["https://github.com/google-a2a/A2A"],
+    systems: ["Hermes", "OpenClaw", "n8n", "Maestri"],
+    nextActions: ["Criar adapter interno simples.", "Mapear envelope de tarefa JRC.", "Nao expor externo ainda."],
+    hardLocks: ["Sem A2A publico sem auth forte.", "Toda delegacao sensivel passa por policy."],
+  },
+  {
+    id: "mcp-registry-allowlist",
+    rank: 12,
+    title: "MCP Registry com allowlist JRC",
+    category: "tooling",
+    ownerAgentId: "jrc-auditor",
+    status: "adopt_pattern",
+    impact: "Abre universo de ferramentas, mas tambem aumenta superficie de ataque.",
+    fit: "Usar catalogo oficial somente como descoberta; instalacao deve passar por auditoria JRC.",
+    repos: ["https://github.com/modelcontextprotocol/servers", "https://github.com/modelcontextprotocol/registry"],
+    systems: ["Codex", "Claude", "Hermes Office"],
+    nextActions: ["Criar allowlist.", "Bloquear stdio arbitrario.", "Registrar risco por servidor MCP."],
+    hardLocks: ["Nao instalar MCP aleatorio.", "Sem servidor com shell amplo sem sandbox."],
+  },
+];
+
+const loadAiRadar = () => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks)
+    ? parsed.tasks.filter((task): task is JsonRecord => Boolean(task && typeof task === "object" && !(task as JsonRecord).archived))
+    : [];
+  const byStatus: Record<string, number> = {};
+  const byCategory: Record<string, number> = {};
+  const latest = AI_TECH_RADAR.map((item) => {
+    const itemTasks = tasks.filter((task) => String(task.sourceEventId || "").startsWith(`ai-radar:${item.id}:`));
+    byStatus[item.status] = (byStatus[item.status] || 0) + 1;
+    byCategory[item.category] = (byCategory[item.category] || 0) + 1;
+    return {
+      ...item,
+      activeTasks: itemTasks.filter((task) => task.status !== "done").length,
+      pendingApprovals: itemTasks.filter((task) => {
+        const approval = task.approval && typeof task.approval === "object" && !Array.isArray(task.approval)
+          ? (task.approval as JsonRecord)
+          : null;
+        return approval?.status === "pending";
+      }).length,
+      readyNow: item.status === "adopt_now",
+    };
+  }).sort((left, right) => left.rank - right.rank);
+  return {
+    total: latest.length,
+    readyNow: latest.filter((item) => item.readyNow).length,
+    byStatus,
+    byCategory,
+    latest,
+    hardLocks: [
+      "Radar cria apenas tarefas internas, pesquisas e checklists.",
+      "Instalacao de ferramenta, MCP amplo, chamada paga e acesso a sistema autenticado exigem aprovacao humana.",
+      "Prioridade e reduzir custo, aumentar auditoria e dar ferramentas seguras aos agentes atuais.",
+    ],
+  };
+};
+
+const createAiRadarSeedTasks = () => {
+  const parsed = readJsonFile(TASKS_FILE);
+  const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+  const now = new Date().toISOString();
+  const created = [];
+  for (const item of AI_TECH_RADAR) {
+    const specs = [
+      { suffix: "fit", agentId: item.ownerAgentId, approval: false, priority: item.rank <= 6 ? "high" : "normal" },
+      { suffix: "risk", agentId: "jrc-auditor", approval: true, priority: item.rank <= 4 ? "high" : "normal" },
+    ];
+    for (const spec of specs) {
+      const sourceEventId = `ai-radar:${item.id}:${spec.suffix}`;
+      if (hasTaskForSource(tasks, sourceEventId)) continue;
+      const task = {
+        id: `jrc-task-${Math.random().toString(16).slice(2, 14)}`,
+        title: `AI Radar #${item.rank} - ${spec.suffix}: ${item.title}`,
+        description: [
+          `Categoria: ${item.category}`,
+          `Status: ${item.status}`,
+          `Impacto: ${item.impact}`,
+          `Encaixe JRC: ${item.fit}`,
+          `Repos:\n- ${item.repos.join("\n- ")}`,
+          `Sistemas relacionados:\n- ${item.systems.join("\n- ")}`,
+          `Proximas acoes:\n- ${item.nextActions.join("\n- ")}`,
+          `Travas:\n- ${item.hardLocks.join("\n- ")}`,
+        ].join("\n\n"),
+        status: "todo",
+        source: "playbook",
+        sourceEventId,
+        assignedAgentId: spec.agentId,
+        createdAt: now,
+        updatedAt: now,
+        updatedAtMs: Date.now(),
+        lastActivityAt: now,
+        priority: spec.priority,
+        domain: item.category,
+        notes: ["Criado pelo AI Radar. Nenhuma instalacao, chamada externa ou gasto foi executado."],
+        archived: false,
+        approval: {
+          required: spec.approval,
+          status: spec.approval ? "pending" : "not_required",
+          reason: spec.approval ? "Nova ferramenta/automacao pode afetar custo, seguranca, PII ou ato externo." : "",
+          resolvedAt: null,
+          resolvedBy: null,
+        },
+      };
+      tasks.unshift(task);
+      created.push(task);
+    }
+  }
+  writeJsonFile(TASKS_FILE, { version: 1, tasks });
+  return created;
+};
+
 const buildVirtualOfficeStatus = () => {
   const parsed = readJsonFile(TASKS_FILE);
   const tasks = Array.isArray(parsed?.tasks)
@@ -1177,6 +1439,7 @@ const buildOpsStatus = async () => {
     virtualOffice: buildVirtualOfficeStatus(),
     secondBrain: loadSecondBrain(),
     strategicPilots: loadStrategicPilots(),
+    aiRadar: loadAiRadar(),
     jrcHub: buildJrcHubStatus(),
     safety: {
       externalActionsLocked: true,
@@ -1210,8 +1473,14 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as JsonRecord & { action?: unknown; mode?: unknown };
     const action = typeof body.action === "string" ? body.action : "mode.set";
-    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed" && action !== "secondBrain.ingest" && action !== "secondBrain.seedRecent" && action !== "strategicPilots.seedTop4") {
+    if (action !== "mode.set" && action !== "costMode.set" && action !== "media.jobs.create" && action !== "virtualOffice.seed" && action !== "secondBrain.ingest" && action !== "secondBrain.seedRecent" && action !== "strategicPilots.seedTop4" && action !== "aiRadar.seed") {
       return NextResponse.json({ error: "Fallback HTTP only supports safe local Ops actions. Connect gateway for execution actions." }, { status: 400 });
+    }
+    if (action === "aiRadar.seed") {
+      createAiRadarSeedTasks();
+      return NextResponse.json(await buildOpsStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     if (action === "strategicPilots.seedTop4") {
       createStrategicPilotSeedTasks();

@@ -51,6 +51,8 @@ if (!/second brain/i.test(text)) failures.push("missing second brain");
 if (!/absorver links/i.test(text)) failures.push("missing second brain ingest action");
 if (!/pilotos top 4/i.test(text)) failures.push("missing strategic pilots");
 if (!/ativar top 4/i.test(text)) failures.push("missing strategic pilots action");
+if (!/ai radar/i.test(text)) failures.push("missing AI radar");
+if (!/semear radar/i.test(text)) failures.push("missing AI radar seed action");
   if (maxUpdateErrors.length > 0) failures.push("React maximum update loop");
   if (errors.length > maxUpdateErrors.length) failures.push("console errors");
 
@@ -83,6 +85,7 @@ if (!/ativar top 4/i.test(text)) failures.push("missing strategic pilots action"
         hasVirtualOffice: true,
         hasSecondBrain: true,
         hasStrategicPilots: true,
+        hasAiRadar: true,
         maxUpdateErrors: 0,
         consoleErrors: 0,
       },
