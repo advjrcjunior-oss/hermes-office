@@ -957,6 +957,8 @@ export function OfficeScreen({
 }: OfficeScreenProps) {
   const searchParams = useSearchParams();
   const debugEnabled = searchParams.get("officeDebug") === "1";
+  const directOpsMode =
+    searchParams.get("hqOpen") === "1" || searchParams.get("hq") === "ops";
   const [settingsCoordinator] = useState(() =>
     createStudioSettingsCoordinator(),
   );
@@ -1401,7 +1403,7 @@ export function OfficeScreen({
     voiceId: voiceRepliesPreference.voiceId,
     speed: voiceRepliesPreference.speed,
   });
-  const showOnboardingWizard = showOnboarding || forceShowOnboarding;
+  const showOnboardingWizard = forceShowOnboarding || (showOnboarding && !directOpsMode);
   const handleOpenOnboarding = useCallback(() => {
     resetOnboarding();
     setCompanyCreatedSignal(0);
@@ -4709,6 +4711,7 @@ export function OfficeScreen({
   }, [agentsLoaded, didAttemptGatewayConnect, shouldPromptForConnect, status]);
 
   const showGatewayLoadingOverlay =
+    !directOpsMode &&
     !agentsLoaded &&
     (!connectPromptReady ||
       (gatewayUrl.trim().length > 0 &&
@@ -4716,6 +4719,7 @@ export function OfficeScreen({
         ((!didAttemptGatewayConnect && showDelayedGatewayLoadingOverlay) ||
           (status === "connecting" && showDelayedGatewayLoadingOverlay))));
   const showGatewayConnectOverlay =
+    !directOpsMode &&
     connectPromptReady &&
     status === "disconnected" &&
     !agentsLoaded &&

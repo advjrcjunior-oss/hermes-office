@@ -12,6 +12,9 @@ const browser = await chromium.launch({
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.addInitScript(() => {
+    window.localStorage.removeItem("claw3d:onboarding:completed");
+  });
   const errors = [];
   page.on("console", (msg) => {
     if (msg.type() === "error") errors.push(msg.text());
@@ -55,6 +58,7 @@ if (!/ai radar/i.test(text)) failures.push("missing AI radar");
 if (!/semear radar/i.test(text)) failures.push("missing AI radar seed action");
 if (!/ai stack hub/i.test(text)) failures.push("missing AI stack hub");
 if (!/preparar stack/i.test(text)) failures.push("missing AI stack seed action");
+if (/welcome to claw3d|connect your gateway/i.test(text)) failures.push("onboarding blocks direct Ops link");
   if (maxUpdateErrors.length > 0) failures.push("React maximum update loop");
   if (errors.length > maxUpdateErrors.length) failures.push("console errors");
 
